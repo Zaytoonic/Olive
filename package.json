@@ -1,0 +1,15 @@
+{
+  "name": "mic-manager",
+  "version": "1.3.0",
+  "description": "Microphone manager for Windows: Windows mic volume/mute, noise gate, noise reduction, EQ, compressor, send to Discord",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "node tools/build.js",
+    "patch-exe": "node tools/patch-exe.js"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "resedit": "^2.0.0"
+  }
+}

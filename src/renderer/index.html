@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' app://local; style-src 'self'">
+  <title>Mic Manager</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="toolbar">
+    <button id="devToggle" class="icon-btn" aria-expanded="true" aria-controls="devicesPanel" title="Hide input devices">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><line x1="7.5" y1="3.5" x2="7.5" y2="16.5"/></svg>
+    </button>
+    <h1>Mic Manager</h1>
+    <span id="sourceBadge" class="badge">Mock audio</span>
+  </header>
+
+  <main>
+    <aside class="panel devices" id="devicesPanel">
+      <div class="section-head">
+        <h2>Input devices</h2>
+        <button id="refreshBtn" class="icon-btn small" title="Rescan devices" aria-label="Rescan devices">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 10a6 6 0 1 1-1.8-4.3"/><polyline points="16.5 3.5 16.5 6.5 13.5 6.5"/></svg>
+        </button>
+      </div>
+      <div id="devStatus" class="hint"></div>
+      <ul id="deviceList" class="group list"></ul>
+    </aside>
+
+    <section class="panel controls">
+      <div class="hero group">
+        <div class="current">
+          <div class="current-text">
+            <div class="caption">Selected microphone</div>
+            <div id="currentName" class="current-name">—</div>
+          </div>
+          <div class="current-actions">
+            <button id="listenBtn" class="pill listen" aria-pressed="false" title="Hear your mic live (use headphones)">Listen</button>
+            <button id="muteBtn" class="pill mute" aria-pressed="false" title="Toggle mute (Ctrl+M)">Mute</button>
+          </div>
+        </div>
+        <div class="meter-block">
+          <div class="row-head"><span class="caption">Input level</span><span id="levelDb" class="value mono">-∞ dB</span></div>
+          <div class="meter">
+            <div id="meterFill" class="meter-fill"></div>
+            <div id="meterCover" class="meter-cover"></div>
+            <div id="meterPeak" class="meter-peak"></div>
+            <div id="gateMark" class="gate-mark" title="Noise gate threshold"></div>
+          </div>
+          <div class="scale mono"><span>-60</span><span>-40</span><span>-20</span><span>-10</span><span>0 dB</span></div>
+        </div>
+      </div>
+
+      <h3 class="group-title">Microphone</h3>
+      <div class="group">
+        <div class="row stack control">
+          <div class="row-head"><label for="volume" class="row-title">Volume</label><span id="volumeVal" class="value">75%</span></div>
+          <input type="range" id="volume" min="0" max="100" value="75">
+          <div class="hint" id="volumeHint"></div>
+        </div>
+        <div class="row stack control">
+          <div class="row-head"><label for="gate" class="row-title">Noise gate</label><span id="gateVal" class="value">Auto</span></div>
+          <input type="range" id="gate" min="-60" max="-10" value="-45" disabled>
+          <div class="hint" id="gateHint">Mutes you when you're quieter than this</div>
+        </div>
+        <div class="row toggle-row">
+          <div>
+            <div class="row-title">Automatic noise gate</div>
+            <div class="hint">Learns your background noise and sets the threshold for you</div>
+          </div>
+          <label class="switch" title="Set the noise gate threshold automatically"><input type="checkbox" id="gateAuto" checked><span></span></label>
+        </div>
+      </div>
+
+      <h3 class="group-title">Output</h3>
+      <div class="group">
+        <div class="row toggle-row send-row">
+          <div>
+            <div class="row-title">Send to Discord / other apps</div>
+            <div class="hint" id="sendHint">Off: other apps hear your raw mic</div>
+          </div>
+          <label class="switch" title="Send the processed mic to VB-Audio Virtual Cable"><input type="checkbox" id="sendToggle" checked><span></span></label>
+        </div>
+        <div class="row toggle-row">
+          <div>
+            <div class="row-title">Mono audio</div>
+            <div class="hint" id="monoHint">Off: stereo mics keep left and right separate</div>
+          </div>
+          <label class="switch" title="Mix left and right into one channel"><input type="checkbox" id="monoToggle"><span></span></label>
+        </div>
+      </div>
+
+      <h3 class="group-title">Processing</h3>
+      <div class="group">
+        <div class="row card">
+          <div class="row-head">
+            <span class="row-title">Noise reduction</span>
+            <label class="switch" title="Automatic noise reduction"><input type="checkbox" id="nrToggle" checked><span></span></label>
+          </div>
+          <input type="range" id="nrAmount" min="0" max="100" value="50" hidden aria-hidden="true">
+          <div class="hint" id="nrHint">On</div>
+        </div>
+        <div class="row card comp">
+          <div class="row-head">
+            <span class="row-title">Compressor / auto-level</span>
+            <label class="switch" title="Even out your volume"><input type="checkbox" id="compToggle"><span></span></label>
+          </div>
+          <input type="range" id="compAmount" min="0" max="100" value="50" disabled aria-label="Compressor strength">
+          <div class="hint" id="compHint">Off: your volume goes out as-is</div>
+        </div>
+        <div class="row card">
+          <div class="row-head">
+            <span class="row-title">Mic monitoring</span>
+            <label class="switch" title="Hear yourself"><input type="checkbox" id="monToggle"><span></span></label>
+          </div>
+          <input type="range" id="monVol" min="0" max="100" value="80" disabled aria-label="Monitoring level">
+          <div class="hint" id="monHint">Off: you won't hear yourself</div>
+        </div>
+      </div>
+
+      <h3 class="group-title">Equalizer</h3>
+      <div class="group">
+        <div class="row card eq">
+          <div class="row-head">
+            <span class="row-title">Mic EQ</span>
+            <div class="eq-head">
+              <select id="eqPreset" title="Preset">
+                <option value="myvoice">My voice (tuned)</option>
+                <option value="flat">Flat</option>
+                <option value="clarity">Voice clarity</option>
+                <option value="broadcast">Broadcast</option>
+                <option value="boom">Reduce boom</option>
+                <option value="custom" hidden>Custom</option>
+              </select>
+              <label class="switch" title="Enable EQ"><input type="checkbox" id="eqToggle" checked><span></span></label>
+            </div>
+          </div>
+          <canvas id="eqCurve" width="600" height="220" tabindex="0" aria-label="EQ graph: drag points to shape your sound"></canvas>
+          <div class="eq-tools">
+            <div class="eq-chips" id="eqChips" role="tablist" aria-label="EQ bands"></div>
+            <div class="eq-readout" id="eqReadout" aria-live="polite"></div>
+          </div>
+          <label class="lowcut"><input type="checkbox" id="lowCut"> Low cut (80 Hz) · removes rumble and desk thumps</label>
+        </div>
+      </div>
+
+      <h3 class="group-title">App</h3>
+      <div class="group">
+        <div class="row toggle-row" id="startupRow">
+          <div>
+            <div class="row-title">Start with Windows</div>
+            <div class="hint" id="startupHint">Opens hidden in the tray when you log in</div>
+          </div>
+          <label class="switch" title="Launch Mic Manager when you log in"><input type="checkbox" id="startupToggle"><span></span></label>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer>Mic Manager 1.3</footer>
+  <script src="renderer.js"></script>
+</body>
+</html>

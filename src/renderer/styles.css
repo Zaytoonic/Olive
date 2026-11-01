@@ -1,0 +1,202 @@
+/* Mic Manager - dark theme following DESIGN.md (Apple HIG): clarity, deference, depth. */
+:root {
+  color-scheme: dark;
+  /* Colors */
+  --canvas: #000000;
+  --surface: #1c1c1e;              /* grouped sections */
+  --tile: #2a2a2c;                 /* controls inside sections */
+  --text: #f5f5f7;
+  --text-2: #98989d;               /* DESIGN.md gray #6E6E73 is for light mode; lighter here to stay legible on black */
+  --accent: #0066cc;               /* Action Blue */
+  --accent-text: #2997ff;          /* blue for text on black */
+  --hairline: #38383a;
+  --green: #30d158; --yellow: #ffd60a; --red: #ff453a; --orange: #ff9f0a;
+  --radius: 12px;
+  --shadow: rgba(0, 0, 0, 0.08) 0px 4px 16px;
+  /* Type */
+  --font: 'SF Pro', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
+  --mono: 'SF Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--canvas); color: var(--text);
+  font: 400 17px/1.4 var(--font);
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column; user-select: none;
+}
+button, select, input { font: inherit; color: inherit; }
+.mono, .value { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ---- Toolbar (glass) ---- */
+.toolbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px; min-height: 60px;
+  background: rgba(28, 28, 30, 0.72);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid var(--hairline);
+}
+h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); margin: 0; }
+.badge {
+  font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 9999px;
+  background: var(--tile); color: var(--text-2);
+}
+.badge.live { display: none; }               /* only show the badge when something is off (mock audio) */
+
+.icon-btn {
+  width: 44px; height: 44px; border-radius: 9999px; border: 0; background: transparent;
+  display: inline-grid; place-items: center; cursor: pointer; color: var(--text-2);
+}
+.icon-btn:hover { background: var(--tile); color: var(--text); }
+.icon-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.icon-btn[aria-expanded="false"] { color: var(--accent-text); }
+
+/* ---- Layout ---- */
+main { flex: 1; display: flex; gap: 16px; padding: 16px; min-height: 0; }
+.panel { overflow: auto; min-height: 0; }
+.devices {
+  width: 296px; flex: none; display: flex; flex-direction: column; gap: 8px;
+  transition: width 200ms ease-out, opacity 150ms ease-out, margin 200ms ease-out;
+}
+body.devices-collapsed .devices { width: 0; opacity: 0; margin-right: -16px; overflow: hidden; pointer-events: none; }
+.controls { flex: 1; padding-right: 4px; max-width: 1440px; }
+footer { padding: 8px 16px; font-size: 12px; color: var(--text-2); border-top: 1px solid var(--hairline); }
+
+.section-head { display: flex; justify-content: space-between; align-items: center; padding: 0 4px 0 16px; min-height: 44px; }
+.section-head .icon-btn.small { width: 36px; height: 36px; }
+.group-title { font-size: 13px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); margin: 24px 16px 8px; }
+
+/* Grouped section (inset grouped list) */
+.group { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.row { padding: 12px 16px; min-height: 44px; }
+.row + .row { border-top: 1px solid var(--hairline); }
+.row-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+.toggle-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.row-title { font-size: 17px; font-weight: 400; }
+.caption { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); }
+.hint { font-size: 13px; color: var(--text-2); margin-top: 4px; }
+.hint:empty { display: none; }
+.value { font-size: 15px; color: var(--text); }
+#devStatus:empty { display: none; }
+#devStatus { padding: 0 16px; }
+
+/* ---- Device list ---- */
+.list { list-style: none; margin: 0; padding: 0; }
+#deviceList li {
+  position: relative; display: flex; flex-direction: column; gap: 2px; justify-content: center;
+  min-height: 44px; padding: 10px 44px 10px 16px; cursor: pointer;
+  transition: background 100ms ease-out, transform 100ms ease-out;
+}
+#deviceList li + li { border-top: 1px solid var(--hairline); }
+#deviceList li:hover { background: var(--tile); }
+#deviceList li:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
+#deviceList li.selected::after {
+  content: ""; position: absolute; right: 18px; top: 50%; width: 6px; height: 12px; margin-top: -8px;
+  border: solid var(--accent-text); border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.dev-name { font-size: 15px; font-weight: 500; }
+#deviceList li.selected .dev-name { color: var(--accent-text); }
+.dev-meta { font-size: 12px; color: var(--text-2); }
+.dev-default { color: var(--accent-text); }
+
+/* ---- Hero: selected mic + meter ---- */
+.hero { padding: 16px; }
+.current { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
+.current-text { min-width: 0; }
+.current-name { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.current-actions { display: flex; gap: 8px; flex: none; }
+.pill {
+  height: 44px; min-width: 104px; padding: 0 20px; border-radius: 9999px; border: 0; cursor: pointer;
+  background: var(--tile); color: var(--text); font-size: 15px; font-weight: 600;
+}
+.pill:hover { background: #3a3a3c; }
+.pill.listen.on { background: var(--accent); color: #fff; }
+.pill.mute.on { background: var(--red); color: #fff; }
+
+.meter { position: relative; height: 12px; background: #2c2c2e; border-radius: 9999px; overflow: hidden; }
+/* The coloured bar never changes; a cover slides over the unlit part. Only transforms change per frame,
+   so the meter animates on the GPU without restyling or re-laying-out the page. */
+.meter-fill { position: absolute; inset: 0; background: linear-gradient(90deg, var(--green) 0%, var(--green) 66%, var(--yellow) 83%, var(--red) 100%); }
+.meter.muted .meter-fill { filter: grayscale(1) brightness(.6); }
+.meter-cover { position: absolute; inset: 0; background: #2c2c2e; transform-origin: right center; transform: scaleX(1); will-change: transform; }
+.meter-peak { position: absolute; inset: 0; transform: translateX(0%); will-change: transform; pointer-events: none; }
+.meter-peak::before { content: ""; position: absolute; top: 0; bottom: 0; left: -2px; width: 2px; background: #fff; opacity: .85; }
+.gate-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--orange); }
+.scale { display: flex; justify-content: space-between; color: var(--text-2); font-size: 11px; margin-top: 6px; }
+
+/* ---- Sliders (thin track, white knob) ---- */
+input[type=range] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 28px; margin: 0; background: transparent; cursor: pointer;
+  --fill: 50%;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 9999px;
+  background: linear-gradient(to right, var(--accent) var(--fill), #48484a var(--fill));
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 24px; height: 24px; margin-top: -10px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0.5px 4px rgba(0, 0, 0, 0.3), 0 3px 8px rgba(0, 0, 0, 0.15);
+  transition: transform 100ms ease-out;
+}
+input[type=range]:active::-webkit-slider-thumb { transform: scale(0.97); }
+input[type=range]:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; border-radius: 9999px; }
+input[type=range]:disabled { opacity: .35; cursor: default; }
+
+/* ---- Switches (iOS style) ---- */
+.switch { position: relative; width: 51px; height: 31px; display: inline-block; flex: none; cursor: pointer; }
+.switch::before { content: ""; position: absolute; inset: -7px -4px; }   /* 44pt touch target */
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch span { position: absolute; inset: 0; background: #39393d; border-radius: 9999px; transition: background 150ms ease-out; }
+.switch span::before {
+  content: ""; position: absolute; width: 27px; height: 27px; left: 2px; top: 2px; border-radius: 50%; background: #fff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16);
+  transition: transform 200ms ease-out;
+}
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::before { transform: translateX(20px); }
+.switch input:focus-visible + span { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.switch input:disabled + span { opacity: .4; cursor: not-allowed; }
+
+/* ---- Instant feedback on press ---- */
+.pill, .icon-btn, .switch span, #deviceList li, select { transition: transform 100ms ease-out, background 100ms ease-out; }
+.pill:active, .icon-btn:active, .switch:active span, #deviceList li:active, select:active { transform: scale(0.97); }
+
+/* ---- Processing cards ---- */
+#sendHint.warn { color: var(--yellow); }
+
+/* ---- EQ ---- */
+.eq-head { display: flex; align-items: center; gap: 12px; }
+select {
+  height: 32px; padding: 0 12px; border-radius: 9999px; border: 0; background: var(--tile); color: var(--text);
+  font-size: 15px; cursor: pointer;
+}
+#eqCurve { width: 100%; height: 220px; display: block; background: #111113; border-radius: 10px; touch-action: none; cursor: crosshair; }
+#eqCurve.grab { cursor: grab; }
+#eqCurve.grabbing { cursor: grabbing; }
+#eqCurve:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.eq-tools { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+.eq-chips { display: flex; gap: 6px; }
+.eq-chip {
+  width: 32px; height: 32px; border-radius: 9999px; border: 0; cursor: pointer;
+  background: var(--tile); color: var(--text); font: 600 13px var(--font);
+  box-shadow: inset 0 0 0 2px var(--band);
+}
+.eq-chip[aria-selected="true"] { background: var(--band); color: #000; }
+.eq-chip:active { transform: scale(0.97); }
+.eq-readout { flex: 1 1 400px; min-width: 0; display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-2); min-height: 32px; }
+.eq-readout b { color: var(--text); font-weight: 600; font-size: 15px; }
+.eq-readout .num { font-family: var(--mono); color: var(--text); }
+.eq-readout b, .eq-readout .num, .eq-readout button, .eq-readout span { white-space: nowrap; }
+.eq-readout button { margin-left: auto; height: 32px; padding: 0 14px; border-radius: 9999px; border: 0; background: var(--tile); color: var(--text); font-size: 13px; cursor: pointer; }
+.eq-readout button:active { transform: scale(0.97); }
+.band .bname b { color: var(--text); font-weight: 500; font-family: var(--mono); }
+.lowcut { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: var(--text-2); min-height: 32px; cursor: pointer; }
+.lowcut input { width: 18px; height: 18px; accent-color: var(--accent); }
+.eq.off .eq-tools, .eq.off #eqCurve, .eq.off .lowcut { opacity: .4; }
+
+@media (max-width: 860px) {
+  .devices { width: 240px; }
+  #eqCurve { height: 180px; }
+}
