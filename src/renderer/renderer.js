@@ -12,7 +12,7 @@ let live = false;            // true when devices come from the system
 const state = {
   deviceId: MOCK_DEVICES.find(d => d.isDefault).id,
   volume: 75, muted: false, gateDb: -45, gateAuto: true,
-  nr: true, nrAmount: 50, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50
+  nr: true, nrAmount: 60, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50
 };
 
 const $ = id => document.getElementById(id);
@@ -65,8 +65,8 @@ function bindControls() {
   $('muteBtn').addEventListener('click', toggleMute);
   document.addEventListener('keydown', e => { if (e.ctrlKey && e.key.toLowerCase() === 'm') toggleMute(); });
 
-  $('nrToggle').addEventListener('change', e => { state.nr = e.target.checked; $('nrAmount').disabled = !state.nr; updateHints(); if (live) startCapture(); });
-  $('nrAmount').addEventListener('input', e => { state.nrAmount = +e.target.value; updateHints(); });
+  $('nrToggle').addEventListener('change', e => { state.nr = e.target.checked; $('nrAmount').disabled = !state.nr; applyNr(); updateHints(); });
+  $('nrAmount').addEventListener('input', e => { state.nrAmount = +e.target.value; applyNr(); updateHints(); });
   $('monToggle').addEventListener('change', e => setMonitor(e.target.checked));
   $('listenBtn').addEventListener('click', () => setMonitor(!state.monitor));
   $('monoToggle').addEventListener('change', e => { state.mono = e.target.checked; applyMono(); });
@@ -170,9 +170,10 @@ function refreshGateUi() {
   }
 }
 function updateHints() {
-  $('nrHint').textContent = state.nr
-    ? (live ? 'On · removes steady background noise (fans, hum, hiss)' : 'On (simulated)')
-    : 'Off';
+  $('nrHint').textContent = !state.nr ? 'Off'
+    : !live ? `On · ${state.nrAmount}% (simulated)`
+    : chains().some(ch => ch.nrFailed) ? 'Unavailable: the noise reduction engine could not start'
+    : `On · ${state.nrAmount}% · lowers steady noise (fans, hum, hiss) by up to ${Math.round(state.nrAmount * NR_DB_PER_PERCENT)} dB`;
   $('monHint').textContent = !state.monitor ? "Off: you won't hear yourself"
     : analyser ? `On · ${state.monitorVol}% · use headphones to avoid echo`
     : live ? 'On · microphone not open, nothing to play'
@@ -306,11 +307,13 @@ function audioCtxInit() {
     buf = eqNodes.meterBuf;
   } catch (err) { audioCtx = null; eqNodes = null; console.error('Audio engine unavailable:', err); }
 }
-// One processing chain: [mono] EQ -> volume -> gate -> output level -> this context's output device.
+// One processing chain: noise reduction -> [mono] EQ -> volume -> gate -> output level -> this context's output device.
 function buildChain(ctx) {
   const hp = ctx.createBiquadFilter(); hp.type = 'lowshelf'; hp.frequency.value = 80; hp.gain.value = 0; hp.Q.value = 0.7;
   const bands = EQ_BANDS.map(b => { const f = ctx.createBiquadFilter(); f.type = b.type; f.frequency.value = b.freq; f.Q.value = b.q; return f; });
   [hp, ...bands].reduce((a, b) => (a.connect(b), b));
+  const head = ctx.createGain();                // the mic connects here; noise reduction is inserted after it
+  head.connect(hp);
   const output = bands[bands.length - 1];
   const volGain = ctx.createGain(), gateGain = ctx.createGain(), outGain = ctx.createGain();
   volGain.gain.value = volFactor();
@@ -325,12 +328,13 @@ function buildChain(ctx) {
   const meter = ctx.createAnalyser();
   meter.fftSize = 1024;
   output.connect(meter);
-  const ch = { ctx, hp, bands, input: hp, output, volGain, comp, compOn: null, gateGain, outGain,
+  const ch = { ctx, head, hp, bands, input: hp, output, volGain, comp, compOn: null, gateGain, outGain,
                meter, meterBuf: new Float32Array(meter.fftSize), gateIsOpen: false, holdUntil: 0 };
   applyCompTo(ch);                              // connects volume -> (compressor ->) gate
   applyMonoTo(ch);
   applyEqTo(ch);
   attachGate(ch);                               // swaps in the audio-thread gate once it has loaded
+  attachNr(ch);                                 // and the noise reduction
   return ch;
 }
 function applyEq() {
@@ -594,7 +598,9 @@ function bindEq() {
   });
   $('eqToggle').addEventListener('change', e => { eq.on = e.target.checked; applyEq(); });
   $('lowCut').addEventListener('change', e => { eq.lowCut = e.target.checked; $('eqPreset').value = 'custom'; applyEq(); });
-  window.addEventListener('resize', scheduleEqDraw);
+  window.addEventListener('resize', scheduleEqDraw);    // also catches display scale changes
+  // The canvas also changes size without the window doing so (devices panel, scrollbar), so watch it directly.
+  new ResizeObserver(scheduleEqDraw).observe($('eqCurve'));
   syncEqUi();
 }
 
@@ -613,7 +619,8 @@ function chainAmplitude(ch) {
 // Preferred: gate-worklet.js on the audio thread (sample-accurate, 5 ms look-ahead, 150 ms hold).
 // Fallback if it can't load: gate from the main thread below (reacts every 20 ms, can clip word starts).
 const GATE_WORKLET_URL = window.GATE_WORKLET_URL || (location.protocol === 'file:' ? 'app://local/gate-worklet.js' : 'gate-worklet.js');
-const gateModules = new WeakMap();
+const NR_WORKLET_URL = window.NR_WORKLET_URL || (location.protocol === 'file:' ? 'app://local/nr-worklet.js' : 'nr-worklet.js');
+const gateModules = new WeakMap(), nrModules = new WeakMap();
 let gateMode = 'loading';                       // loading | audio-thread | main-thread
 function loadGateModule(ctx) {
   if (!gateModules.has(ctx)) gateModules.set(ctx, ctx.audioWorklet.addModule(GATE_WORKLET_URL));
@@ -651,6 +658,38 @@ function detachGate(ch) {                         // worklet crashed: fall back 
   ch.compOn = null; applyCompTo(ch);
   ch.gateIsOpen = !ch.gateIsOpen; gateChain(ch, 0, performance.now());
 }
+// ---- Noise reduction ----
+// nr-worklet.js on the raw mic. Strength never rebuilds anything, so moving the slider doesn't interrupt the audio.
+const NR_DB_PER_PERCENT = 0.3;                    // same value as in nr-worklet.js
+async function attachNr(ch) {
+  try {
+    if (!ch.ctx.audioWorklet) throw new Error('AudioWorklet not supported');
+    if (!nrModules.has(ch.ctx)) nrModules.set(ch.ctx, ch.ctx.audioWorklet.addModule(NR_WORKLET_URL));
+    await nrModules.get(ch.ctx);
+    if (ch.ctx.state === 'closed') return;
+    const node = new AudioWorkletNode(ch.ctx, 'noise-reduction', { numberOfInputs: 1, numberOfOutputs: 1, parameterData: { strength: nrStrengthNow() } });
+    node.onprocessorerror = () => { detachNr(ch); ch.nrFailed = true; updateHints(); };
+    ch.nr = node;
+    ch.head.disconnect();
+    ch.head.connect(node);
+    node.connect(ch.hp);
+  } catch (err) {
+    ch.nrFailed = true;
+    updateHints();
+    console.warn('Noise reduction unavailable:', err && err.message);
+  }
+}
+function detachNr(ch) {
+  const node = ch.nr; if (!node) return;
+  ch.nr = null;
+  try { ch.head.disconnect(); node.disconnect(); } catch {}
+  ch.head.connect(ch.hp);
+}
+const nrStrengthNow = () => (state.nr ? state.nrAmount : 0);
+function applyNr() {
+  for (const ch of chains()) if (ch.nr) ch.nr.parameters.get('strength').setValueAtTime(nrStrengthNow(), ch.ctx.currentTime);
+}
+
 function updateGateThreshold() {
   for (const ch of chains()) if (ch.gate) {
     ch.gate.parameters.get('threshold').setValueAtTime(state.gateDb, ch.ctx.currentTime);
@@ -705,7 +744,7 @@ async function startCapture() {
     const s = await navigator.mediaDevices.getUserMedia({
       audio: {
         deviceId: { exact: state.deviceId },
-        noiseSuppression: state.nr, echoCancellation: false, autoGainControl: false
+        noiseSuppression: false, echoCancellation: false, autoGainControl: false   // raw mic: nr-worklet.js does the noise reduction
       }
     });
     if (token !== captureToken) { s.getTracks().forEach(tr => tr.stop()); return; }
@@ -713,7 +752,7 @@ async function startCapture() {
     if (!audioCtx || !eqNodes) throw Object.assign(new Error('No audio engine'), { name: 'AudioEngineError' });
     if (audioCtx.state === 'suspended') await audioCtx.resume();
     srcNode = audioCtx.createMediaStreamSource(stream);
-    srcNode.connect(eqNodes.input);
+    srcNode.connect(eqNodes.head);
     analyser = eqNodes.meter;                                // marks live capture as active
     connectSendSource();
     setStatus('');
@@ -790,7 +829,7 @@ function connectSendSource() {
   if (sendSrc) { try { sendSrc.disconnect(); } catch {} sendSrc = null; }
   if (!sendNodes || !stream) return;
   sendSrc = sendCtx.createMediaStreamSource(stream);
-  sendSrc.connect(sendNodes.input);
+  sendSrc.connect(sendNodes.head);
 }
 function teardownSend() {
   if (sendSrc) { try { sendSrc.disconnect(); } catch {} }
@@ -972,7 +1011,7 @@ function loadPrefs() {
   if (typeof p.gateAuto === 'boolean') state.gateAuto = p.gateAuto;
   state.mono = p.mono === true;
   if (typeof p.nr === 'boolean') state.nr = p.nr;   // remembered (on by default)
-  state.nrAmount = num(p.nrAmount, 0, 100, state.nrAmount);
+  state.nrAmount = num(p.nrStrength, 0, 100, state.nrAmount);   // not the old nrAmount: that slider never changed the live audio
   state.monitorVol = num(p.monitorVol, 0, 100, state.monitorVol);
   state.comp = p.comp === true;
   state.compAmount = num(p.compAmount, 0, 100, state.compAmount);
@@ -1027,7 +1066,7 @@ function savePrefs() {
   clearTimeout(saveTimer); saveTimer = null;
   const p = {
     deviceId: prefDeviceId, deviceName: prefDeviceName, volume: state.volume, gateDb: state.gateDb, gateAuto: state.gateAuto, mono: state.mono, tunedVoice: 1,
-    nr: state.nr, nrAmount: state.nrAmount, monitorVol: state.monitorVol, send: sendWanted,
+    nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol, send: sendWanted,
     comp: state.comp, compAmount: state.compAmount, devicesCollapsed,
     eq: { on: eq.on, lowCut: eq.lowCut, preset: $('eqPreset').value,
           bands: Object.fromEntries(EQ_BANDS.map(d => [d.key, { ...eq.b[d.key] }])) }
@@ -1078,7 +1117,7 @@ function setDevicesCollapsed(c) {
   $('devicesPanel').setAttribute('aria-hidden', String(c));
   $('devicesPanel').inert = c;                    // no tabbing into the hidden list
 }
-$('devToggle').addEventListener('click', () => { setDevicesCollapsed(!devicesCollapsed); savePrefs(); setTimeout(scheduleEqDraw, 220); });
+$('devToggle').addEventListener('click', () => { setDevicesCollapsed(!devicesCollapsed); savePrefs(); });
 
 // ---- Init ----
 applyTunedOnce(loadPrefs());

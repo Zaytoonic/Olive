@@ -14,6 +14,7 @@ src/main/        Electron main process: window, tray, start-with-Windows, Window
 src/renderer/    the window
   index.html, styles.css, renderer.js
   gate-worklet.js  noise gate that runs on the audio thread
+  nr-worklet.js    noise reduction with adjustable strength, also on the audio thread
 assets/          icon.png, icon.ico, tray-icon.png
 tools/           build.js, patch-exe.js
 dist/MicManager/ the built app (MicManager.exe + Electron runtime)

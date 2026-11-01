@@ -6,14 +6,17 @@ const fs = require('fs');
 const RENDERER = path.join(__dirname, '..', 'renderer');
 const ASSETS = path.join(__dirname, '..', '..', 'assets');
 
-// ---- app://local/gate-worklet.js ----
-// The noise gate runs as an AudioWorklet. Chromium won't load worklet code from file://, so this one
-// file is served from a private app:// address that allows the page to load it (no network involved).
+// ---- app://local/gate-worklet.js, nr-worklet.js ----
+// The noise gate and noise reduction run as AudioWorklets. Chromium won't load worklet code from file://, so these
+// files are served from a private app:// address that allows the page to load it (no network involved).
 // The page itself stays on file://, which keeps its saved settings.
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }
 ]);
-const WORKLETS = { '/gate-worklet.js': path.join(RENDERER, 'gate-worklet.js') };
+const WORKLETS = {
+  '/gate-worklet.js': path.join(RENDERER, 'gate-worklet.js'),
+  '/nr-worklet.js': path.join(RENDERER, 'nr-worklet.js')
+};
 function serveWorklet(request) {
   const url = new URL(request.url);
   const file = url.host === 'local' ? WORKLETS[url.pathname] : undefined;
