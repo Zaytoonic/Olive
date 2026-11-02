@@ -67,21 +67,23 @@ const HIDDEN_ARG = '--hidden';
 const startedHidden = process.argv.includes(HIDDEN_ARG);
 // Quoted: the install path has spaces, and an unquoted one makes Windows guess where the program name ends.
 const loginItemOpts = () => ({ path: `"${process.execPath}"`, args: [HIDDEN_ARG] });
+// A copy with its own settings folder is a test or a trial: it must never point Windows' login entry at itself.
+const canRegisterAtLogin = () => process.platform === 'win32' && app.isPackaged && !app.commandLine.hasSwitch('user-data-dir');
 function upgradeLoginItem() {                 // an entry saved by an older version has no quotes
-  if (process.platform !== 'win32' || !app.isPackaged) return;
+  if (!canRegisterAtLogin()) return;
   const old = { path: process.execPath, args: [HIDDEN_ARG] };
-  if (app.getLoginItemSettings(old).openAtLogin) app.setLoginItemSettings({ openAtLogin: true, ...loginItemOpts() });
+  if (app.getLoginItemSettings(old).openAtLogin && !app.getLoginItemSettings(loginItemOpts()).openAtLogin) app.setLoginItemSettings({ openAtLogin: true, ...loginItemOpts() });
 }
 // Only the built app may register itself. From source (npm start) process.execPath is the bare electron.exe, which
 // at login has no app to load and opens Electron's "run this command" welcome window.
 ipcMain.handle('startup:get', () => {
   if (process.platform !== 'win32') return { supported: false, enabled: false };
-  if (!app.isPackaged) return { supported: false, enabled: false, reason: 'Only in the built app (MicManager.exe)' };
+  if (!canRegisterAtLogin()) return { supported: false, enabled: false, reason: app.isPackaged ? 'Not in a trial copy' : 'Only in the built app (MicManager.exe)' };
   return { supported: true, enabled: !!app.getLoginItemSettings(loginItemOpts()).openAtLogin };
 });
 ipcMain.handle('startup:set', (event, on) => {
   if (process.platform !== 'win32') throw new Error('Windows only');
-  if (!app.isPackaged) throw new Error('Only in the built app (MicManager.exe)');
+  if (!canRegisterAtLogin()) throw new Error('Only in the installed copy of the app');
   app.setLoginItemSettings({ openAtLogin: on === true, ...loginItemOpts() });
   return { supported: true, enabled: !!app.getLoginItemSettings(loginItemOpts()).openAtLogin };
 });
