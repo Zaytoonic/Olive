@@ -28,13 +28,12 @@ body {
 button, select, input { font: inherit; color: inherit; }
 .mono, .value { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
-/* ---- Toolbar (glass) ---- */
+/* ---- Toolbar ---- */
 .toolbar {
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; gap: 12px;
   padding: 8px 16px; min-height: 60px;
-  background: rgba(28, 28, 30, 0.72);
-  backdrop-filter: blur(20px) saturate(180%);
+  background: var(--surface);
   border-bottom: 1px solid var(--hairline);
 }
 h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }

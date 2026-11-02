@@ -149,12 +149,16 @@ function syncChains() {
   if (!need && audioCtx.state === 'running') audioCtx.suspend();
   syncTicker();
 }
-// The 50x-per-second timer only matters while drawing, or when a chain needs the main-thread gate.
-let tickTimer = null;
+// The timer runs while the window is showing (the meter), or when a chain needs the main-thread gate (which needs 20 ms).
+let tickTimer = null, tickMs = 0;
 function syncTicker() {
-  const needed = !isHidden() || !analyser || chains().some(ch => !ch.gate);
-  if (needed && !tickTimer) { last = performance.now(); tickTimer = setInterval(tick, 20); }
-  if (!needed && tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+  const mainThreadGate = chains().some(ch => !ch.gate);
+  const ms = mainThreadGate ? 20 : !isHidden() || !analyser ? 33 : 0;
+  if (ms === tickMs) return;
+  clearInterval(tickTimer);
+  tickMs = ms;
+  tickTimer = null;
+  if (ms) { last = performance.now(); tickTimer = setInterval(tick, ms); }
 }
 // Mono: the first EQ node downmixes to 1 channel ((L+R)/2), which then plays in both ears.
 function applyMono() {
@@ -294,15 +298,15 @@ function tick() {
 
   levelPct = dbToPct(smoothed);
   peakPct = dbToPct(peak);
-  if ((compTick = (compTick + 1) % 12) === 0) {          // ~4x per second
+  if ((compTick = (compTick + 1) % 8) === 0) {           // ~4x per second
     if (state.comp && eqNodes) updateCompHint();
     if (state.gateAuto) refreshGateUi();
-    paintRanges();
   }
+  drawMeter(now);
 }
 let compTick = 0, levelPct = 0, peakPct = 0;
 
-// Blue fill up to the knob on every slider (also catches values set from code).
+// Blue fill up to the knob on every slider.
 function paintRanges() {
   for (const r of document.querySelectorAll('input[type=range]')) {
     const v = (((r.value - r.min) / (r.max - r.min)) * 100).toFixed(1) + '%';
@@ -311,29 +315,27 @@ function paintRanges() {
 }
 document.addEventListener('input', e => { if (e.target.type === 'range') paintRanges(); });
 
-// Drawing runs once per screen frame and only touches GPU transforms; text changes at most 10x per second.
+// The meter only touches GPU transforms, and only when the value changed, so a quiet meter asks for no redraws at all.
+// Text changes at most 5x per second. Slider fills only change with their sliders.
 const ui = {};
-let shownCover = '', shownPeak = '', shownDb = '', dbShownAt = 0, drawing = false, windowHidden = false;
+let shownCover = '', shownPeak = '', shownDb = '', dbShownAt = 0, windowHidden = false;
 // Hidden = minimized / in the tray. Electron tells us via preload (document.hidden can't, see main.js).
 const isHidden = () => windowHidden || document.hidden;
-function startDrawing() { if (!drawing && !isHidden()) { drawing = true; requestAnimationFrame(draw); } }
-if (window.appWindow) window.appWindow.onVisibility(v => { windowHidden = !v; if (v) { startDrawing(); scheduleEqDraw(); } syncTicker(); });
-document.addEventListener('visibilitychange', startDrawing);
-function draw(now) {
-  if (isHidden()) { drawing = false; return; }        // stop the frame loop entirely until shown again
-  requestAnimationFrame(draw);
+if (window.appWindow) window.appWindow.onVisibility(v => { windowHidden = !v; if (v) scheduleEqDraw(); syncTicker(); });
+document.addEventListener('visibilitychange', () => syncTicker());
+function drawMeter(now) {
   const cover = 'scaleX(' + (1 - levelPct / 100).toFixed(3) + ')';
   if (cover !== shownCover) { ui.cover.style.transform = cover; shownCover = cover; }
   const pk = 'translateX(' + peakPct.toFixed(1) + '%)';
   if (pk !== shownPeak) { ui.peak.style.transform = pk; shownPeak = pk; }
-  if (now - dbShownAt >= 100) {
+  if (now - dbShownAt >= 200) {
     dbShownAt = now;
     const t = state.muted ? 'Muted' : (smoothed <= MIN_DB ? '-∞ dB' : smoothed.toFixed(1) + ' dB');
     if (t !== shownDb) { ui.levelDb.textContent = t; shownDb = t; }
     drawSendLevel();
   }
 }
-// Level other apps receive: the loudest moment since the last reading (10x per second), falling back slowly.
+// Level other apps receive, read 5x per second, falling back slowly.
 let sendShown = MIN_DB, shownSendDb = '', shownSendCover = '';
 function drawSendLevel() {
   if (!sendNodes || !state.send) return;
@@ -342,7 +344,7 @@ function drawSendLevel() {
   let sum = 0;
   for (let i = 0; i < b.length; i++) sum += b[i] * b[i];
   const db = Math.max(MIN_DB, ampToDb(Math.sqrt(sum / b.length) * 1.41));
-  sendShown = db > sendShown ? db : Math.max(db, sendShown - 4);
+  sendShown = db > sendShown ? db : Math.max(db, sendShown - 8);
   const cover = 'scaleX(' + (1 - dbToPct(sendShown) / 100).toFixed(3) + ')';
   if (cover !== shownSendCover) { $('sendCover').style.transform = cover; shownSendCover = cover; }
   const text = sendShown <= MIN_DB ? '-∞ dB' : sendShown.toFixed(1) + ' dB';
@@ -1105,6 +1107,7 @@ function applySysToUi() {
     state.volume = Math.round(ep.volume * 100);
     $('volume').value = state.volume;
     $('volumeVal').textContent = state.volume + '%';
+    paintRanges();
     if (ep.muted !== state.muted) setMutedUi(ep.muted);
     hint.textContent = '';                                  // normal state: no extra text
     hint.title = '';
@@ -1380,8 +1383,7 @@ bindControls(); bindEq(); updateGate(); updateHints(); updateCompHint(); paintRa
 initStartup();
 initMuteHotkey();
 ui.cover = $('meterCover'); ui.peak = $('meterPeak'); ui.levelDb = $('levelDb');
-syncTicker();                          // meter and any main-thread gate, 50x per second while needed
-startDrawing();                        // meter drawing, only while the window is visible
+syncTicker();                          // meter and any main-thread gate, only while needed
 applySysToUi();
 loadDevices();
 setInterval(pollSys, 2000);
