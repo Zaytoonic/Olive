@@ -46,7 +46,7 @@ function runNr(input, strength) {
   return out;
 }
 function offlineChecks() {
-  console.log('\nNoise reduction, offline');
+  console.log('\nFallback noise reduction, offline (used if the voice engine cannot start)');
   const LATENCY = 1024, n = SR * 24, start = SR * 8;
   const noise = makeNoise(n);
   const passthrough = runNr(noise, 0);
@@ -85,7 +85,7 @@ function offlineChecks() {
 // Limits put words first: a gate that lets some leftover noise through at high strength beats one that cuts speech.
 // Measured on a real voice in Nov 2026: this rule stayed open 99-100% across the speech range.
 function gateChecks(fixture) {
-  console.log('\nNoise gate, offline: does it cut speech?');
+  console.log('\nFallback volume gate, offline: does it cut speech? (also used when the gate is set by hand)');
   const L = fixture.samples.length, n = L * 3, W = 960, NR_DELAY = 1024, GATE_DELAY = NR_DELAY + 240;
   const input = new Float32Array(n);
   for (let i = 0; i < n; i++) input[i] = fixture.samples[i % L];
@@ -112,6 +112,39 @@ function gateChecks(fixture) {
     for (const [lvl, limit, onsetLimit] of [[-25, 98, 90], [-35, 98, 90], [-42, 95, 50]]) {
       check(`NR ${strength}%: speech at ${lvl} dB not cut`, pct(voice[lvl]) >= limit && pct(onset[lvl]) >= onsetLimit, `open ${f1(pct(voice[lvl]))}% (limit ${limit}%), first 60 ms ${f1(pct(onset[lvl]))}% (limit ${onsetLimit}%)`);
     }
+  }
+}
+
+// ---- The voice engine (RNNoise), offline ----
+const VOICE_DELAY = 1440;
+function loadVoice() {
+  const ctx = vm.createContext({ AudioWorkletProcessor: class { constructor() { this.port = { postMessage() {} }; } }, sampleRate: SR, Math, Float32Array, Uint16Array, Infinity, WebAssembly, console, setTimeout, clearTimeout, atob: t => Buffer.from(t, 'base64').toString('latin1'), registerProcessor: (_, c) => { ctx.Proc = c; } });
+  ctx.globalThis = ctx;
+  vm.runInContext(fs.readFileSync(path.join(RENDERER, 'vendor', 'rnnoise-sync.js'), 'utf8').replace('import.meta.url', '""').replace(/export default createRNNWasmModuleSync;\s*$/, 'globalThis.createRNN = createRNNWasmModuleSync;'), ctx);
+  vm.runInContext(fs.readFileSync(path.join(RENDERER, 'voice-worklet.js'), 'utf8').replace(/import createRNNWasmModuleSync from [^\n]*\n/, 'const createRNNWasmModuleSync = globalThis.createRNN;\n'), ctx);
+  return new ctx.Proc();
+}
+function runVoice(input, strength, gate) {
+  const p = loadVoice(), out = new Float32Array(input.length), params = { strength: new Float32Array([strength]), gate: new Float32Array([gate]) };
+  for (let i = 0; i + 128 <= input.length; i += 128) { const o = new Float32Array(128); p.process([[input.subarray(i, i + 128)]], [[o]], params); out.set(o, i); }
+  return out;
+}
+function voiceChecks() {
+  console.log('\nVoice engine, offline');
+  const n = SR * 24, D = VOICE_DELAY, noise = makeNoise(n), fan = makeGustyFan(n);
+  const dry = runVoice(noise, 0, 0); let err = 0, pow = 0;
+  for (let i = SR; i < n - D; i++) { err += (dry[i + D] - noise[i]) ** 2; pow += noise[i] ** 2; }
+  check('0% leaves audio unchanged', toDb(err) - toDb(pow) < -80, `difference ${f1(toDb(err) - toDb(pow))} dB relative to the signal`);
+  const level = (x, d = 0) => { let e = 0; for (let i = SR * 3; i < n - D; i++) e += x[i + d] ** 2; return toDb(e); };
+  for (const [name, src, min60, min100] of [['steady noise', noise, 12, 20], ['gusty fan', fan, 8, 8]]) {
+    const drops = [25, 60, 100].map(v => level(src) - level(runVoice(src, v, 0), D));
+    check(`${name} comes down`, drops[1] >= min60 && drops[2] >= min100, `drop at 25/60/100%: ${drops.map(f1).join(' / ')} dB (at least ${min60} at 60%, ${min100} at 100%)`);
+  }
+  // The gate's job: shut on noise, even gusts, with no volume threshold to fool.
+  const openPct = (out, ref) => { let o = 0, c = 0; for (let i = SR * 2; i + 960 + D < n; i += 960) { let a = 0, b = 0; for (let k = 0; k < 960; k++) { a += out[i + D + k] ** 2; b += ref[i + D + k] ** 2; } c++; if (toDb(a) >= toDb(b) - 20) o++; } return 100 * o / c; };
+  for (const [name, src, limit] of [['steady noise', noise, 5], ['gusty fan', fan, 10]]) {
+    const pct = openPct(runVoice(src, 100, 1), runVoice(src, 100, 0));
+    check(`gate stays shut on ${name}`, pct <= limit, `open ${f1(pct)}% (limit ${limit}%)`);
   }
 }
 
@@ -163,14 +196,14 @@ class Copy {
 // ---- Runs inside the page ----
 const pageReady = async () => {
   for (let i = 0; i < 100; i++) {
-    try { if (stream && eqNodes && eqNodes.nr && eqNodes.gate) return true; } catch { /* page script still loading */ }
+    try { if (stream && eqNodes && eqNodes.voice && eqNodes.gate) return true; } catch { /* page script still loading */ }
     await new Promise(r => setTimeout(r, 200));
   }
   try { return JSON.stringify({ stream: !!stream, nr: !!(eqNodes && eqNodes.nr), gate: !!(eqNodes && eqNodes.gate), nrFailed: !!(eqNodes && eqNodes.nrFailed) }); } catch (err) { return err.message; }
 };
 const pageInfo = () => {
   const s = stream.getAudioTracks()[0].getSettings();
-  return { suppression: s.noiseSuppression, sendConnected: !!sendNodes, comp: state.comp, nr: state.nr, amount: state.nrAmount, auto: state.gateAuto };
+  return { suppression: s.noiseSuppression, sendConnected: !!sendNodes, comp: state.comp, nr: state.nr, amount: state.nrAmount, auto: state.gateAuto, engine: !!eqNodes.voice };
 };
 const pageNrLevels = async strength => {
   state.nr = strength > 0; state.nrAmount = strength; applyNr();
@@ -258,7 +291,7 @@ function analyseGate(cap, fixture) {
     if (c > best) { best = c; offset = o; }
   }
 
-  const skip = Math.round(2 / 0.02), shut = f => end[f] < nr[f] - 20;
+  const skip = Math.round(2 / 0.02), shut = f => end[f] < mic[f] - 40;
   const groups = { noise: [] }; fixture.voiceLevels.forEach(l => { groups[l] = []; });
   const onset = {}; fixture.voiceLevels.forEach(l => { onset[l] = []; });
   for (let f = skip; f < frames; f++) {
@@ -307,6 +340,7 @@ async function liveChecks(profile, wav, fixture) {
     await sleep(1000);
     const info = await copy.call(pageInfo);
     check('mic is captured raw', info.suppression === false, `Chromium noise suppression reports ${info.suppression}`);
+    check('the voice engine is running', info.engine === true, `voice engine active: ${info.engine}`);
     check('nothing reaches the real cable', info.sendConnected === false, `send chain connected: ${info.sendConnected}`);
 
     if (wanted('app')) {
@@ -317,28 +351,28 @@ async function liveChecks(profile, wav, fixture) {
 
     if (wanted('nr')) console.log('\nNoise reduction slider');
     const drops = [];
-    for (const [s, min, max] of wanted('nr') ? [[0, -0.5, 0.5], [25, 4, 9], [60, 9, 19], [100, 13, 31]] : []) {
+    for (const [s, min, max] of wanted('nr') ? [[0, -0.5, 0.5], [25, 4, 9], [60, 12, 25], [100, 20, 200]] : []) {
       const r = await copy.call(pageNrLevels, s), drop = r.raw - r.out;
       check(`${s}% lowers steady noise by ${min}-${max} dB`, drop >= min && drop <= max && (!drops.length || drop > drops[drops.length - 1]), `measured ${f1(drop)} dB (${f1(r.raw)} -> ${f1(r.out)})`);
       drops.push(drop);
     }
 
     if (wanted('gate')) {
-      console.log('\nWhole chain, 30 s of noise and speech: noise reduction 60%, compressor on');
-      await copy.call(s => { state.nr = true; state.nrAmount = s; applyNr(); }, 60);
+      console.log('\nWhole chain, 30 s of noise and speech: noise reduction 100%, compressor on');
+      await copy.call(s => { state.nr = true; state.nrAmount = s; applyNr(); }, 100);
       await sleep(7000);                 // the gate's noise floor has a 6 s memory
       const g = analyseGate(await copy.call(pageCapture, 30), fixture);
       const placed = Math.abs(g.micNoise - NOISE_DB) < 3 && g.voice[-25].mic > g.voice[-35].mic + 5 && g.voice[-35].mic > g.voice[-42].mic + 2;
       check('capture lines up with the test file', placed, `mic levels: noise ${f1(g.micNoise)}, speech ${[-25, -35, -42].map(l => f1(g.voice[l].mic)).join(' / ')} dB`);
-      console.log(`        auto threshold ${f1(g.threshold)} dB; noise going in ${f1(g.noise.nrLevel)} dB, coming out ${f1(g.noise.endLevel)} dB`);
+      console.log(`        noise going in ${f1(g.micNoise)} dB, coming out ${f1(g.noise.endLevel)} dB`);
       check('gate shuts on noise', g.noise.openPct <= 30, `open ${f1(g.noise.openPct)}% of ${f1(g.noise.seconds)} s, ${g.noise.flips} flips`);
-      check('speech reaches the end of the chain', g.voice[-25].openPct >= 80 && g.voice[-25].endLevel > g.noise.nrLevel + 20, `open ${f1(g.voice[-25].openPct)}%, output ${f1(g.voice[-25].endLevel)} dB`);
+      check('speech reaches the end of the chain', g.voice[-25].openPct >= 80 && g.voice[-25].endLevel > g.micNoise + 10, `open ${f1(g.voice[-25].openPct)}%, output ${f1(g.voice[-25].endLevel)} dB`);
       check('output does not clip', g.peakDb < -0.5, `peak ${f1(g.peakDb)} dB`);
     }
 
     if (wanted('mute')) {
       console.log('\nMute');
-      await copy.call(() => { state.nr = true; state.nrAmount = 60; applyNr(); setMonitor(true); });
+      await copy.call(() => { state.nr = true; state.nrAmount = 100; state.gateAuto = false; updateGate(); applyNr(); setMonitor(true); });
       await sleep(7000);
       const on = await copy.call(pageOutPeak, 14);       // longer than the file's 8 s without speech
       check('sound flows when unmuted', on > -50, `output peak ${f1(on)} dB`);
@@ -389,7 +423,7 @@ async function liveChecks(profile, wav, fixture) {
   writeWav(wav, fixture.samples);
   console.log(`Test signal: ${fixture.seconds} s, steady noise at ${NOISE_DB} dB, speech-like phrases at ${fixture.voiceLevels.join(', ')} dB`);
   try {
-    if (wanted('nr')) offlineChecks();
+    if (wanted('nr')) { voiceChecks(); offlineChecks(); }
     if (wanted('gate')) gateChecks(fixture);
     await liveChecks(path.join(dir, 'profile'), wav, fixture);
   } catch (err) {
