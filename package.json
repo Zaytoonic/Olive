@@ -4,6 +4,7 @@
   "description": "Microphone manager for Windows: Windows mic volume/mute, noise gate, noise reduction, EQ, compressor, send to Discord",
   "main": "src/main/main.js",
   "scripts": {
+    "prestart": "node tools/build-helper.js",
     "start": "electron .",
     "build": "node tools/build.js",
     "patch-exe": "node tools/patch-exe.js",

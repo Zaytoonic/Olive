@@ -9,6 +9,7 @@ if (!fs.existsSync(path.join(root, 'dist', 'MicManager', 'MicManager.exe'))) {
   console.error('dist/MicManager/MicManager.exe not found (the Electron runtime folder).');
   process.exit(1);
 }
+require('./build-helper').buildHelper();
 fs.rmSync(appDir, { recursive: true, force: true });
 for (const dir of ['src', 'assets']) fs.cpSync(path.join(root, dir), path.join(appDir, dir), { recursive: true });
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));

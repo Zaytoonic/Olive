@@ -10,7 +10,8 @@ src/main/        Electron main process: window, tray, start-with-Windows, Window
   main.js          app window, tray, app:// (serves the noise-gate worklet)
   preload.js       safe bridge between the window and main.js
   sysmic-client.js runs win-audio.ps1 and talks to it
-  win-audio.ps1    Windows Core Audio: list mics, set volume / mute; reports the ASUS mic key
+  win-audio.cs     Windows Core Audio helper: list mics, set volume / mute; reports the ASUS mic key
+  win-audio.ps1    runs that helper through PowerShell if win-audio.exe (built from it, not in git) is missing
 src/renderer/    the window
   index.html, styles.css, renderer.js
   gate-worklet.js  volume gate: used when the gate is set by hand, or as the fallback
@@ -18,7 +19,7 @@ src/renderer/    the window
   vendor/          RNNoise compiled to WebAssembly (@jitsi/rnnoise-wasm 0.2.1, Apache-2.0, see its license file)
   nr-worklet.js    fallback noise reduction, if the voice engine can't start
 assets/          icon.png, icon.ico, tray-icon.png, tray-icon-muted.png
-tools/           build.js, patch-exe.js, audio-test/ (npm run test:audio)
+tools/           build.js, build-helper.js, patch-exe.js, audio-test/ (npm run test:audio)
 dist/MicManager/ the built app (MicManager.exe + Electron runtime)
 ```
 
