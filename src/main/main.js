@@ -15,7 +15,9 @@ protocol.registerSchemesAsPrivileged([
 ]);
 const WORKLETS = {
   '/gate-worklet.js': path.join(RENDERER, 'gate-worklet.js'),
-  '/nr-worklet.js': path.join(RENDERER, 'nr-worklet.js')
+  '/nr-worklet.js': path.join(RENDERER, 'nr-worklet.js'),
+  '/voice-worklet.js': path.join(RENDERER, 'voice-worklet.js'),
+  '/rnnoise-sync.js': path.join(RENDERER, 'vendor', 'rnnoise-sync.js')
 };
 function serveWorklet(request) {
   const url = new URL(request.url);

@@ -174,6 +174,7 @@ const pageInfo = () => {
 };
 const pageNrLevels = async strength => {
   state.nr = strength > 0; state.nrAmount = strength; applyNr();
+  if (eqNodes.voice) eqNodes.voice.parameters.get('gate').setValueAtTime(0, audioCtx.currentTime);   // measure the noise part alone
   await new Promise(r => setTimeout(r, 6000));         // the noise estimate has a ~4 s memory
   const a = audioCtx.createAnalyser(), b = audioCtx.createAnalyser(); a.fftSize = b.fftSize = 2048;
   srcNode.connect(a); eqNodes.nr.connect(b);
@@ -186,6 +187,7 @@ const pageNrLevels = async strength => {
     await new Promise(r => setTimeout(r, 40));
   }
   srcNode.disconnect(a); eqNodes.nr.disconnect(b);
+  if (eqNodes.voice) eqNodes.voice.parameters.get('gate').setValueAtTime(state.gateAuto ? 1 : 0, audioCtx.currentTime);
   const p10 = l => [...l].sort((x, y) => x - y)[Math.floor(l.length * 0.1)];
   return { raw: p10(la), out: p10(lb) };
 };
