@@ -1119,7 +1119,7 @@ async function initStartup() {
   if (!api) return off('Only in the Windows app');
   try {
     const r = await api.get();
-    if (!r.supported) return off('Windows only');
+    if (!r.supported) return off(r.reason || 'Windows only');
     t.checked = r.enabled;
   } catch (err) { return off('Unavailable: ' + cleanErr(err)); }
   t.addEventListener('change', async () => {
