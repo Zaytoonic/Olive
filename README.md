@@ -21,7 +21,7 @@ src/renderer/    the window
   vendor/          RNNoise compiled to WebAssembly (@jitsi/rnnoise-wasm 0.2.1, Apache-2.0, see its license file)
   nr-worklet.js    fallback noise reduction, if the voice engine can't start
 assets/          icon.png, icon.ico, tray-icon.png, tray-icon-muted.png, taskbar-muted-badge.png
-tools/           build.js, build-helper.js, patch-exe.js, audio-test/ (npm run test:audio)
+tools/           build.js, build-helper.js, patch-exe.js, update-runtime.js, audio-test/ (npm run test:audio)
 dist/MicManager/ the built app (MicManager.exe + Electron runtime)
 ```
 
@@ -29,6 +29,7 @@ dist/MicManager/ the built app (MicManager.exe + Electron runtime)
 1. `npm install` (once)
 2. `npm run build` copies `src` and `assets` into `dist/MicManager/resources/app`
 3. `npm run patch-exe` (only if the icon or version changed; close the app first)
+   After changing Electron's version, run `npm run update-runtime` before these steps.
 4. `npm run test:audio` after audio changes: measures the chain on a fake mic in a hidden, muted copy (about 3 minutes; your running app and settings aren't touched)
 
 Or run from source with `npm start`.

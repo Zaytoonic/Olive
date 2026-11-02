@@ -8,13 +8,11 @@
     "start": "electron .",
     "build": "node tools/build.js",
     "patch-exe": "node tools/patch-exe.js",
-    "test:audio": "node tools/audio-test/run.js"
+    "test:audio": "node tools/audio-test/run.js",
+    "update-runtime": "node tools/update-runtime.js"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
+    "electron": "^45.2.1",
     "resedit": "^2.0.0"
-  },
-  "allowScripts": {
-    "electron@33.4.11": true
   }
 }
