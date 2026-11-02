@@ -12,6 +12,12 @@ contextBridge.exposeInMainWorld('appWindow', {
   onVisibility: cb => { ipcRenderer.on('window:visible', (event, visible) => cb(visible === true)); }
 });
 
+contextBridge.exposeInMainWorld('appMute', {
+  onToggle: cb => { ipcRenderer.on('mute:toggle', () => cb()); },
+  setState: on => ipcRenderer.invoke('mute:state', on === true),
+  setHotkey: on => ipcRenderer.invoke('mute:hotkey', on === true)
+});
+
 contextBridge.exposeInMainWorld('appStartup', {
   get: () => ipcRenderer.invoke('startup:get'),
   set: on => ipcRenderer.invoke('startup:set', on === true)
