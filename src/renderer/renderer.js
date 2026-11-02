@@ -1246,21 +1246,26 @@ window.addEventListener('beforeunload', () => { if (saveTimer) savePrefs(); });
 // ---- The laptop's mic key ----
 // ASUS's own software answers the key by flipping mute on the Windows default recording device. So wait for that to land,
 // then follow it. If nothing flipped (that software isn't running), an odd number of presses is a toggle.
-let micKeyPresses = 0, micKeyTimer = null;
+// Everything compares with the state before the first press: the background check can notice ASUS's change and mute
+// the app first, and comparing with the state at that point would read as "nothing flipped" and undo the mute.
+const micKeyResult = (before, presses, defaultMuted) =>
+  (defaultMuted !== null && defaultMuted !== before ? defaultMuted : presses % 2 ? !before : before);
+let micKeyPresses = 0, micKeyTimer = null, micKeyBefore = false;
 function onMicKey() {
+  if (micKeyPresses === 0) micKeyBefore = state.muted;
   micKeyPresses++;
+  sysTouched = performance.now();                      // hold off the background check while this settles
   clearTimeout(micKeyTimer);
   micKeyTimer = setTimeout(settleMicKey, 250);
 }
 async function settleMicKey() {
-  const presses = micKeyPresses; micKeyPresses = 0;
+  const presses = micKeyPresses, before = micKeyBefore;
+  micKeyPresses = 0;
   let def = null;
   if (sysApi && live && sysStatus === 'ready') {
     try { const list = await sysApi.list(); list.forEach(e => storeSys(e)); sysEndpoints.forEach(e => { const n = list.find(x => x.id === e.id); if (n) e.isDefault = n.isDefault; }); def = list.find(e => e.isDefault); } catch { /* use what we know */ }
   }
-  if (def && def.muted !== state.muted) setAllMuted(def.muted);
-  else if (presses % 2) setAllMuted(!state.muted);
-  else setAllMuted(state.muted);
+  setAllMuted(micKeyResult(before, presses, def ? def.muted : null));
 }
 
 // ---- Mute hotkey and tray ----

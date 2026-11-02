@@ -493,6 +493,19 @@ async function liveChecks(profile, wav, fixture) {
         await copy.call(() => { state.muteAccel = 'Control+Alt+M'; return applyMuteHotkey(); });
       }
       await copy.call(() => setMonitor(false));
+      // The mic key: follow what ASUS did, always judged from before the press. Each row is [before, presses, default device now, expected].
+      const keyRows = await copy.call(() => [[false, 1, true, true], [true, 1, false, false], [false, 1, false, true], [true, 1, true, false], [false, 2, false, false], [false, 2, true, true], [false, 1, null, true], [true, 2, null, true]].map(([b, p, d, want]) => ({ b, p, d, want, got: micKeyResult(b, p, d) })));
+      check('mic key decisions', keyRows.every(r => r.got === r.want), keyRows.filter(r => r.got !== r.want).map(r => JSON.stringify(r)).join(' ') || `${keyRows.length} cases, including the background check arriving first`);
+      const burst = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), was = state.muted;
+        onMicKey(); onMicKey(); onMicKey();
+        setMutedUi(!was);                                // something changes the state between the press and the settle
+        await wait(700);
+        const three = state.muted;
+        setMutedUi(was);
+        return { was, three };
+      });
+      check('the state is judged from the first press of a burst', burst.three === !burst.was, `before ${burst.was}, after three quick presses ${burst.three}`);
     }
 
     if (!wanted('eq')) return;
