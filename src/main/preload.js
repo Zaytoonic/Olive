@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('appWindow', {
 
 contextBridge.exposeInMainWorld('appMute', {
   onToggle: cb => { ipcRenderer.on('mute:toggle', () => cb()); },
+  onMicKey: cb => { ipcRenderer.on('mute:mic-key', () => cb()); },
   setState: on => ipcRenderer.invoke('mute:state', on === true),
   setHotkey: on => ipcRenderer.invoke('mute:hotkey', on === true)
 });

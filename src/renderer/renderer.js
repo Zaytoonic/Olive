@@ -75,14 +75,18 @@ function bindControls() {
   $('compToggle').addEventListener('change', e => { state.comp = e.target.checked; $('compAmount').disabled = !state.comp; applyComp(); });
   $('compAmount').addEventListener('input', e => { state.compAmount = +e.target.value; applyComp(); });
 }
-function toggleMute() {
-  setMutedUi(!state.muted);
+function toggleMute() { setAllMuted(!state.muted); }
+// Mute means everything agrees: the app, the selected mic, and the Windows recording devices Discord could listen to
+// (the virtual cable and the default device). Otherwise unmuting here could leave the cable muted, and Discord silent.
+function setAllMuted(m) {
+  setMutedUi(m);
   const ep = curSys();
-  if (ep) {
-    sysTouched = performance.now();
-    sysApi.setMute(ep.id, state.muted).then(r => storeSys(r)).catch(sysFailed);
-  }
+  if (!ep) return;
+  sysTouched = performance.now();
+  sysApi.setMute(ep.id, m).then(r => storeSys(r)).catch(sysFailed);
+  for (const e of linkedEndpoints()) if (e.id !== ep.id && e.muted !== m) sysApi.setMute(e.id, m).then(r => storeSys(r)).catch(sysFailed);
 }
+const linkedEndpoints = () => sysEndpoints.filter(e => e.isDefault || isCableLabel(e.name));
 function setMutedUi(m) {
   state.muted = m;
   const b = $('muteBtn');
@@ -986,6 +990,8 @@ async function syncSystem() {
   }
   matchEndpoints();
   applySysToUi();
+  const ep = curSys();                                 // starting up: if anything is muted, say so and make it all agree
+  if (ep) { const m = ep.muted || linkedEndpoints().some(e => e.muted); if (m !== state.muted || linkedEndpoints().some(e => e.muted !== m)) setAllMuted(m); }
 }
 
 const cleanErr = err => String((err && err.message) || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
@@ -1059,7 +1065,14 @@ async function pollSys() {
   try {
     const r = await sysApi.get(ep.id);
     if (performance.now() - sysTouched < 1500 || curSys() !== ep) return;   // user acted meanwhile
-    if (storeSys(r)) applySysToUi();
+    if (storeSys(r)) { applySysToUi(); setAllMuted(ep.muted); return; }      // the mic changed elsewhere: it wins
+    for (const e of linkedEndpoints()) {
+      if (e.id === ep.id) continue;
+      const c = await sysApi.get(e.id);
+      if (performance.now() - sysTouched < 1500) return;
+      storeSys(c);
+      if (c.muted !== state.muted) { setAllMuted(c.muted); return; }
+    }
   } catch (err) { /* transient; next poll retries */ }
 }
 
@@ -1152,6 +1165,26 @@ document.addEventListener('dblclick', scheduleSave);
 document.addEventListener('change', () => savePrefs());
 window.addEventListener('beforeunload', () => { if (saveTimer) savePrefs(); });
 
+// ---- The laptop's mic key ----
+// ASUS's own software answers the key by flipping mute on the Windows default recording device. So wait for that to land,
+// then follow it. If nothing flipped (that software isn't running), an odd number of presses is a toggle.
+let micKeyPresses = 0, micKeyTimer = null;
+function onMicKey() {
+  micKeyPresses++;
+  clearTimeout(micKeyTimer);
+  micKeyTimer = setTimeout(settleMicKey, 250);
+}
+async function settleMicKey() {
+  const presses = micKeyPresses; micKeyPresses = 0;
+  let def = null;
+  if (sysApi && live && sysStatus === 'ready') {
+    try { const list = await sysApi.list(); list.forEach(e => storeSys(e)); sysEndpoints.forEach(e => { const n = list.find(x => x.id === e.id); if (n) e.isDefault = n.isDefault; }); def = list.find(e => e.isDefault); } catch { /* use what we know */ }
+  }
+  if (def && def.muted !== state.muted) setAllMuted(def.muted);
+  else if (presses % 2) setAllMuted(!state.muted);
+  else setAllMuted(state.muted);
+}
+
 // ---- Mute hotkey and tray ----
 // window.appMute comes from preload.js. The window may have been hidden for a while, so ask Windows for the
 // current mute state first: otherwise the toggle could go the wrong way after something else changed it.
@@ -1170,6 +1203,7 @@ function initMuteHotkey() {
   const t = $('muteKeyToggle');
   if (!window.appMute) { t.disabled = true; t.checked = false; $('muteKeyHint').textContent = 'Only in the Windows app'; return; }
   window.appMute.onToggle(toggleMuteFromOutside);
+  window.appMute.onMicKey(onMicKey);
   t.checked = state.muteHotkey;
   t.addEventListener('change', () => { state.muteHotkey = t.checked; applyMuteHotkey(); });
   applyMuteHotkey();

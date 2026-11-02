@@ -36,9 +36,10 @@ function getHelper(allowRestart) {
   if (!helper || (helper.dead && allowRestart)) {
     if (helper) helper.stop();
     helper = new HelperClient('powershell.exe', [
-      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-MTA', '-ExecutionPolicy', 'Bypass',   // MTA: firmware events arrive without a message loop
       '-File', path.join(__dirname, 'win-audio.ps1')
     ]);
+    helper.onEvent = ev => { if (ev === 'mic-key' && win && !win.isDestroyed()) win.webContents.send('mute:mic-key'); };
   }
   return helper;
 }

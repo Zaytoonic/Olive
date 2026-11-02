@@ -10,7 +10,7 @@ src/main/        Electron main process: window, tray, start-with-Windows, Window
   main.js          app window, tray, app:// (serves the noise-gate worklet)
   preload.js       safe bridge between the window and main.js
   sysmic-client.js runs win-audio.ps1 and talks to it
-  win-audio.ps1    Windows Core Audio: list mics, set volume / mute
+  win-audio.ps1    Windows Core Audio: list mics, set volume / mute; reports the ASUS mic key
 src/renderer/    the window
   index.html, styles.css, renderer.js
   gate-worklet.js  volume gate: used when the gate is set by hand, or as the fallback
