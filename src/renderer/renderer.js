@@ -12,7 +12,7 @@ let live = false;            // true when devices come from the system
 const state = {
   deviceId: MOCK_DEVICES.find(d => d.isDefault).id,
   volume: 75, muted: false, gateDb: -45, gateAuto: true,
-  nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M'
+  nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M', theme: 'glass'
 };
 
 const $ = id => document.getElementById(id);
@@ -378,6 +378,12 @@ const EQ_PRESETS = {
   broadcast: { bass: 4,  lowmid: -1, mid: -2, presence: 3, brilliance: 1, air: 2, lowCut: true },
   boom:      { bass: -6, lowmid: -3, mid: 0,  presence: 1, brilliance: 0, air: 0, lowCut: true }
 };
+const GRAPH_COLORS = {
+  classic: { gridZero: '#48484a', grid: '#2c2c2e', vertical: '#232325', label: '#98989d', fill: 'rgba(0,102,204,0.16)', ring: '#fff' },
+  glass: { gridZero: '#b4b3d6', grid: '#e0dff2', vertical: '#ebeaf7', label: '#4f4e78', fill: 'rgba(124,108,240,0.16)', ring: '#26254a' }
+};
+const GLASS_BANDS = { bass: '#5b9df0', lowmid: '#8b7cf6', mid: '#c17df2', presence: '#f06fa6', brilliance: '#f5a25d', air: '#4fc7d6' };
+const bandColor = d => (state.theme === 'glass' ? GLASS_BANDS[d.key] : d.color);
 const eq = { on: true, lowCut: false, b: {} };          // b[key] = { f: Hz, g: dB, q }
 const bandDef = key => EQ_BANDS.find(d => d.key === key);
 function resetBand(key) { const d = bandDef(key); eq.b[key] = { f: d.freq, g: 0, q: d.q }; }
@@ -503,7 +509,7 @@ function renderEqChips() {
   EQ_BANDS.forEach((d, i) => {
     const b = document.createElement('button');
     b.className = 'eq-chip'; b.textContent = String(i + 1); b.dataset.key = d.key;
-    b.setAttribute('role', 'tab'); b.title = d.name; b.style.setProperty('--band', d.color);
+    b.setAttribute('role', 'tab'); b.title = d.name; b.style.setProperty('--band', bandColor(d));
     b.addEventListener('click', () => selectBand(eqSel === d.key ? null : d.key));
     wrap.appendChild(b);
   });
@@ -581,19 +587,20 @@ function drawEqCurve() {
   const x0 = EQ_PAD.l, x1 = eqW - EQ_PAD.r;
   for (let i = 0; i < EQ_N; i++) eqFreqs[i] = eqF(x0 + (x1 - x0) * i / (EQ_N - 1));
 
+  const colors = GRAPH_COLORS[state.theme] || GRAPH_COLORS.classic;
   // grid
   ctx.lineWidth = 1; ctx.font = "11px system-ui, 'Segoe UI', sans-serif"; ctx.textBaseline = 'middle';
   for (const g of [-12, -6, 0, 6, 12]) {
     const y = Math.round(eqY(g)) + 0.5;
-    ctx.strokeStyle = g === 0 ? '#48484a' : '#2c2c2e';
+    ctx.strokeStyle = g === 0 ? colors.gridZero : colors.grid;
     ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
-    ctx.fillStyle = '#98989d'; ctx.textAlign = 'right'; ctx.fillText((g > 0 ? '+' : '') + g, x0 - 6, y);
+    ctx.fillStyle = colors.label; ctx.textAlign = 'right'; ctx.fillText((g > 0 ? '+' : '') + g, x0 - 6, y);
   }
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
   for (const [f, t] of [[50, '50'], [100, '100'], [200, '200'], [500, '500'], [1000, '1k'], [2000, '2k'], [5000, '5k'], [10000, '10k']]) {
     const x = Math.round(eqX(f)) + 0.5;
-    ctx.strokeStyle = '#232325'; ctx.beginPath(); ctx.moveTo(x, EQ_PAD.t); ctx.lineTo(x, eqH - EQ_PAD.b); ctx.stroke();
-    ctx.fillStyle = '#98989d'; ctx.fillText(t, x, eqH - 5);
+    ctx.strokeStyle = colors.vertical; ctx.beginPath(); ctx.moveTo(x, EQ_PAD.t); ctx.lineTo(x, eqH - EQ_PAD.b); ctx.stroke();
+    ctx.fillStyle = colors.label; ctx.fillText(t, x, eqH - 5);
   }
   if (!disp) return;
 
@@ -615,20 +622,25 @@ function drawEqCurve() {
   const path = arr => { ctx.beginPath(); for (let i = 0; i < EQ_N; i++) { const x = x0 + (x1 - x0) * i / (EQ_N - 1), y = eqY(arr[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } };
   const y0 = eqY(0);
   if (selCurve) {                                       // selected band's own shape
-    const col = bandDef(eqSel).color;
+    const col = bandColor(bandDef(eqSel));
     path(selCurve); ctx.lineTo(x1, y0); ctx.lineTo(x0, y0); ctx.closePath();
     ctx.globalAlpha = 0.22; ctx.fillStyle = col; ctx.fill(); ctx.globalAlpha = 1;
   }
   path(total); ctx.lineTo(x1, y0); ctx.lineTo(x0, y0); ctx.closePath();
-  ctx.fillStyle = 'rgba(0,102,204,0.16)'; ctx.fill();
-  path(total); ctx.strokeStyle = '#2997ff'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = colors.fill; ctx.fill();
+  let curveColor = '#2997ff';
+  if (state.theme === 'glass') {                        // an iridescent line across the graph
+    curveColor = ctx.createLinearGradient(x0, 0, x1, 0);
+    [[0, '#35a7cf'], [0.4, '#5f6fe8'], [0.7, '#8f5fe6'], [1, '#d7558f']].forEach(([at, c]) => curveColor.addColorStop(at, c));
+  }
+  path(total); ctx.strokeStyle = curveColor; ctx.lineWidth = 2; ctx.stroke();
 
   // points
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = "600 11px system-ui, 'Segoe UI', sans-serif";
   EQ_BANDS.forEach((d, i) => {
     const p = eqPoint(d.key), sel = d.key === eqSel;
-    if (sel) { ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke(); }
-    ctx.beginPath(); ctx.arc(p.x, p.y, 8.5, 0, Math.PI * 2); ctx.fillStyle = d.color; ctx.fill();
+    if (sel) { ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.strokeStyle = colors.ring; ctx.lineWidth = 2; ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(p.x, p.y, 8.5, 0, Math.PI * 2); ctx.fillStyle = bandColor(d); ctx.fill();
     ctx.fillStyle = '#000'; ctx.fillText(String(i + 1), p.x, p.y + 0.5);
   });
 }
@@ -1199,6 +1211,7 @@ function loadPrefs() {
   state.compAmount = num(p.compAmount, 0, 100, state.compAmount);
   state.muteHotkey = p.muteHotkey !== false;
   if (typeof p.muteAccel === 'string') state.muteAccel = p.muteAccel;
+  state.theme = p.theme === 'classic' ? 'classic' : 'glass';
   sendWanted = true;                             // Send to Discord is always on at launch;
   state.send = true;                             // loadDevices() connects the cable once devices are known
   devicesCollapsed = p.devicesCollapsed === true;
@@ -1240,7 +1253,7 @@ function savePrefs() {
   const p = {
     deviceId: prefDeviceId, deviceName: prefDeviceName, volume: state.volume, gateDb: state.gateDb, gateAuto: state.gateAuto, mono: state.mono, tunedVoice: 1,
     nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol, send: sendWanted,
-    comp: state.comp, compAmount: state.compAmount, devicesCollapsed, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel,
+    comp: state.comp, compAmount: state.compAmount, devicesCollapsed, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel, theme: state.theme,
     eq: snapshotEq(),
     eqByMic: eqOwner ? { ...eqByMic, [eqOwner]: snapshotEq() } : eqByMic
   };
@@ -1376,6 +1389,21 @@ async function initStartup() {
   });
 }
 
+// ---- Appearance ----
+// Glass or Classic: instant, remembered, and it changes nothing but the look. Classic means no theme attribute at all,
+// so styles.css applies exactly as it always has.
+function applyTheme(name) {
+  state.theme = name === 'classic' ? 'classic' : 'glass';
+  if (state.theme === 'glass') document.documentElement.dataset.theme = 'glass';
+  else delete document.documentElement.dataset.theme;
+  $('themeSelect').value = state.theme;
+  renderEqChips();
+  for (const c of $('eqChips').children) c.setAttribute('aria-selected', String(c.dataset.key === eqSel));
+  scheduleEqDraw();
+  if (window.appInfo) window.appInfo.setTheme(state.theme);
+}
+function chooseTheme(name) { applyTheme(name); savePrefs(); }
+
 // ---- Collapsible input devices panel ----
 function setDevicesCollapsed(c) {
   devicesCollapsed = c;
@@ -1396,6 +1424,9 @@ $('micSelect').addEventListener('change', e => selectDevice(e.target.value));
 audioCtxInit();
 applyMono();
 bindControls(); bindEq(); updateGate(); updateHints(); updateCompHint(); paintRanges();
+applyTheme(state.theme);
+$('themeSelect').addEventListener('change', e => chooseTheme(e.target.value));
+if (window.appInfo) window.appInfo.onThemeChosen(chooseTheme);
 initStartup();
 initMuteHotkey();
 ui.cover = $('meterCover'); ui.peak = $('meterPeak'); ui.levelDb = $('levelDb');

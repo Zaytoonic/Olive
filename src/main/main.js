@@ -161,6 +161,15 @@ ipcMain.handle('mute:hotkey', (event, accelerator) => {
   return ok;
 });
 ipcMain.handle('app:version', () => app.getVersion());
+// The page owns the look. This keeps the window's backing colour and the tray menu in step with it.
+let theme = 'glass';
+const THEME_BACKGROUND = { glass: '#eeebfc', classic: '#0f1115' };
+ipcMain.handle('app:theme', (event, name) => {
+  theme = name === 'classic' ? 'classic' : 'glass';
+  if (win && !win.isDestroyed()) win.setBackgroundColor(THEME_BACKGROUND[theme]);
+  updateTray();
+});
+const chooseTheme = name => { if (win && !win.isDestroyed()) win.webContents.send('app:theme-chosen', name); };
 
 // A red slashed-mic badge on the taskbar button while muted, when the window is open.
 function updateTaskbarBadge() {
@@ -176,6 +185,10 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Mic Manager', click: showWindow },
     { label: 'Mute microphone', type: 'checkbox', checked: muted, click: requestMuteToggle },
+    { label: 'Appearance', submenu: [
+      { label: 'Glass', type: 'radio', checked: theme === 'glass', click: () => chooseTheme('glass') },
+      { label: 'Classic', type: 'radio', checked: theme === 'classic', click: () => chooseTheme('classic') }
+    ] },
     { type: 'separator' },
     { label: 'Quit', click: quitApp }
   ]));
