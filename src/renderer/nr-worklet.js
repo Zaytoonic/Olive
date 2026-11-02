@@ -10,6 +10,9 @@
 // - Strength (0-100) sets how far a bin may be turned down (0.3 dB per percent) and how much the noise estimate is
 //   raised (mildly until the top of the range, where it trades voice for depth).
 //   At 0 every gain is exactly 1 and the audio passes through unchanged, only delayed by one frame.
+// - Starting up: digital silence (before the mic connects, between mics, Windows mute) wipes what was learned, so the
+//   next sound is learned from scratch: an even average for the first second, then the ~1 s rolling one. Silence must
+//   not reach the tracker, or "lowest level" becomes zero and nothing counts as speech-free for seconds.
 // Adds one frame of latency (~21 ms at 48 kHz) whether or not it is reducing anything.
 
 const N = 1024, HOP = 256, BINS = N / 2 + 1;
@@ -18,7 +21,8 @@ const FRAMES_PER_SEC = sampleRate / HOP;
 const SMOOTH = 0.85;             // smoothing of bin power for the speech detector
 const MIN_FRAMES = Math.round(2 * FRAMES_PER_SEC);  // two windows of this = ~4 s of memory for a bin's lowest level
 const SPEECH_RATIO = 5;          // above this many times that lowest level, a bin holds speech: don't learn from it
-const NOISE_KEEP = Math.exp(-1 / FRAMES_PER_SEC);   // the noise average's ~1 s time constant
+const NOISE_FRAMES = Math.round(FRAMES_PER_SEC);    // the noise average's ~1 s time constant
+const SILENCE = N * 1e-11;       // total squared samples in a frame below about -110 dBFS
 const RAISE_MAX = 3;             // how far 100% strength raises the noise estimate
 const DD = 0.92;                 // decision-directed weight
 const GAIN_FALL = 0.5;           // per frame; rises are immediate so word starts aren't dulled
@@ -69,20 +73,37 @@ class Channel {
     this.prevClean = new Float32Array(BINS);           // last frame's cleaned power / noise
     this.rawGain = new Float32Array(BINS);
     this.gain = new Float32Array(BINS).fill(1);
+    this.learned = new Uint16Array(BINS);              // speech-free frames averaged so far
     this.frames = 0; this.minFill = 0;
+    this.heard = 0;                                    // frames since the last silent one
+  }
+
+  forget() {
+    this.frames = 0; this.minFill = 0;
+    this.minNow.fill(Infinity); this.minOld.fill(Infinity);
+    this.learned.fill(0); this.prevClean.fill(0); this.gain.fill(1);
   }
 
   frame(floor, raise) {
-    const { re, im, inRing, power, noise, minNow, minOld, prevClean, rawGain, gain } = this;
+    const { re, im, inRing, power, noise, minNow, minOld, prevClean, rawGain, gain, learned } = this;
+    let energy = 0;
+    for (let i = 0; i < N; i++) energy += inRing[i] * inRing[i];
+    if (energy < SILENCE) this.heard = 0; else this.heard++;
+    if (this.heard === 0) this.forget();
+    const tracking = this.heard * HOP >= N;            // only frames that are all sound, none of the silence before it
     for (let i = 0, p = this.inPos; i < N; i++, p = (p + 1) % N) { re[i] = inRing[p] * win[i]; im[i] = 0; }
     fft(re, im, -1);
     const first = this.frames === 0;
     for (let k = 0; k < BINS; k++) {
       const pw = re[k] * re[k] + im[k] * im[k];
-      power[k] = first ? pw : SMOOTH * power[k] + (1 - SMOOTH) * pw;
-      if (power[k] < minNow[k]) minNow[k] = power[k];
-      if (first) noise[k] = pw;
-      else if (power[k] < SPEECH_RATIO * Math.min(minNow[k], minOld[k])) noise[k] = NOISE_KEEP * noise[k] + (1 - NOISE_KEEP) * power[k];
+      if (tracking) {
+        power[k] = first ? pw : SMOOTH * power[k] + (1 - SMOOTH) * pw;
+        if (power[k] < minNow[k]) minNow[k] = power[k];
+        if (first || power[k] < SPEECH_RATIO * Math.min(minNow[k], minOld[k])) {
+          if (learned[k] < NOISE_FRAMES) learned[k]++;
+          noise[k] += (power[k] - noise[k]) / learned[k];
+        }
+      }
       const gamma = pw / Math.max(raise * noise[k], 1e-14);   // signal-to-noise in this bin now
       const xi = DD * prevClean[k] + (1 - DD) * Math.max(gamma - 1, 0);
       const wiener = xi / (1 + xi);
@@ -97,8 +118,8 @@ class Channel {
       re[k] *= g; im[k] *= g;
       if (k > 0 && k < N / 2) { re[N - k] = re[k]; im[N - k] = -im[k]; }
     }
-    this.frames++;
-    if (++this.minFill >= MIN_FRAMES) {                // slide the minimum's memory window
+    if (tracking) this.frames++;
+    if (tracking && ++this.minFill >= MIN_FRAMES) {                // slide the minimum's memory window
       this.minFill = 0;
       minOld.set(minNow);
       minNow.fill(Infinity);

@@ -70,6 +70,13 @@ function offlineChecks() {
   let num = 0, den = 0;
   for (let i = start; i < n - LATENCY; i++) { num += mixedOut[i + LATENCY] * fanVoice[i]; den += fanVoice[i] * fanVoice[i]; }
   const voiceOverFan = 20 * Math.log10(Math.max(num / den, 1e-6));
+  // Slow start: silence, then noise. Reduction should be working soon after the sound begins, including after a mic switch.
+  const startup = new Float32Array(SR * 16); startup.set(noise.subarray(0, SR * 7), SR);
+  startup.set(fan.subarray(SR, SR * 8), SR * 9);                  // 1 s silence: a second mic with different noise
+  const startupOut = runNr(startup, 60), segDrop = (a, b) => { const lvl = (x, d) => { let e = 0; for (let i = Math.round(a * SR); i < b * SR; i++) e += x[i + d] ** 2; return toDb(e); }; return lvl(startup, 0) - lvl(startupOut, LATENCY); };
+  const settled = segDrop(5, 7.5), soon = segDrop(1.75, 3), soonAfterSwitch = segDrop(9.75, 11);
+  check('noise reduction works within 2 s of starting', soon >= settled * 0.6, `${f1(soon)} dB at 0.75-2 s after sound starts, ${f1(settled)} dB once settled (at least 60% of settled)`);
+  check('and again after switching mics', soonAfterSwitch >= 6, `${f1(soonAfterSwitch)} dB at 0.75-2 s after a 1 s silence`);
   check('gusty fan rumble comes down', fanDrops[1] >= 10 && fanDrops[2] > fanDrops[0], `drop at 25/60/100%: ${fanDrops.map(f1).join(' / ')} dB (at least 10 at 60%)`);
   check('voice survives over the fan', voiceOverFan >= -6, `${f1(voiceOverFan)} dB at 60% (limit -6)`);
 }
