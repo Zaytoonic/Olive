@@ -1,21 +1,30 @@
 // Noise reduction on the audio thread (AudioWorklet), with an adjustable strength.
 // Chromium's built-in suppressor is only on/off, so the app captures the raw mic and does this itself.
 // - Each 1024-sample frame (hop 256, sqrt-Hann windows) is split into frequency bins.
-// - Noise estimate per bin: the lowest smoothed level over the last ~1.5 s, so it follows steady noise
-//   (fans, hum, hiss) and is not fooled by speech, which always has gaps in each bin.
-// - Gain per bin: Wiener filter with decision-directed smoothing (avoids "musical noise").
-// - Strength (0-100) sets how far a bin may be turned down (0.3 dB per percent, so 100 = 30 dB) and how much
-//   the noise estimate is raised. Measured: a fixed low estimate never got past ~15 dB, a fixed high one costs quiet
-//   speech up to 7 dB even at low settings, so low strengths stay gentle and only high ones trade voice for depth.
+// - Noise estimate per bin: an average over about 1 s of the moments with no speech in that bin. A bin counts as
+//   speech-free while it stays near its lowest level of the last ~4 s.
+// - Gain per bin: square root of a Wiener filter with decision-directed smoothing, then smoothed across neighbouring
+//   bins and over time. Measured on a real fan: this keeps ~4 dB more voice and flickers ~30% less (the robotic sound).
+// - Rumble: gusts below ~110 Hz change too fast to learn, and were most of the measured fan energy, so they are simply
+//   turned down, as far as the strength allows.
+// - Strength (0-100) sets how far a bin may be turned down (0.3 dB per percent) and how much the noise estimate is
+//   raised (mildly until the top of the range, where it trades voice for depth).
 //   At 0 every gain is exactly 1 and the audio passes through unchanged, only delayed by one frame.
 // Adds one frame of latency (~21 ms at 48 kHz) whether or not it is reducing anything.
 
 const N = 1024, HOP = 256, BINS = N / 2 + 1;
 const DB_PER_PERCENT = 0.3;
-const SMOOTH = 0.85;             // smoothing of bin power for the noise tracker
-const MIN_FRAMES = 140;          // ~0.75 s at 48 kHz; two windows of this = ~1.5 s of memory
-const BIAS_MIN = 2, BIAS_RANGE = 6;  // the minimum of a smoothed level sits well below its average; see strength above
-const DD = 0.96;                 // decision-directed weight
+const FRAMES_PER_SEC = sampleRate / HOP;
+const SMOOTH = 0.85;             // smoothing of bin power for the speech detector
+const MIN_FRAMES = Math.round(2 * FRAMES_PER_SEC);  // two windows of this = ~4 s of memory for a bin's lowest level
+const SPEECH_RATIO = 5;          // above this many times that lowest level, a bin holds speech: don't learn from it
+const NOISE_KEEP = Math.exp(-1 / FRAMES_PER_SEC);   // the noise average's ~1 s time constant
+const RAISE_MAX = 3;             // how far 100% strength raises the noise estimate
+const DD = 0.92;                 // decision-directed weight
+const GAIN_FALL = 0.5;           // per frame; rises are immediate so word starts aren't dulled
+const RUMBLE_HZ = 110;
+const rumble = new Float32Array(BINS);
+for (let k = 0; k < BINS; k++) rumble[k] = Math.min(1, Math.pow(k * sampleRate / N / RUMBLE_HZ, 4));
 
 const win = new Float32Array(N);
 for (let i = 0; i < N; i++) win[i] = Math.sqrt(0.5 - 0.5 * Math.cos(2 * Math.PI * i / N));
@@ -54,14 +63,17 @@ class Channel {
     this.out = new Float32Array(N); this.outRead = 0;  // overlap-add buffer
     this.re = new Float32Array(N); this.im = new Float32Array(N);
     this.power = new Float32Array(BINS);
+    this.noise = new Float32Array(BINS);
     this.minNow = new Float32Array(BINS).fill(Infinity);
     this.minOld = new Float32Array(BINS).fill(Infinity);
     this.prevClean = new Float32Array(BINS);           // last frame's cleaned power / noise
+    this.rawGain = new Float32Array(BINS);
+    this.gain = new Float32Array(BINS).fill(1);
     this.frames = 0; this.minFill = 0;
   }
 
-  frame(floor, bias) {
-    const { re, im, inRing, power, minNow, minOld, prevClean } = this;
+  frame(floor, raise) {
+    const { re, im, inRing, power, noise, minNow, minOld, prevClean, rawGain, gain } = this;
     for (let i = 0, p = this.inPos; i < N; i++, p = (p + 1) % N) { re[i] = inRing[p] * win[i]; im[i] = 0; }
     fft(re, im, -1);
     const first = this.frames === 0;
@@ -69,12 +81,19 @@ class Channel {
       const pw = re[k] * re[k] + im[k] * im[k];
       power[k] = first ? pw : SMOOTH * power[k] + (1 - SMOOTH) * pw;
       if (power[k] < minNow[k]) minNow[k] = power[k];
-      const noise = Math.max(bias * Math.min(minNow[k], minOld[k]), 1e-14);
-      const gamma = pw / noise;                        // signal-to-noise in this bin now
+      if (first) noise[k] = pw;
+      else if (power[k] < SPEECH_RATIO * Math.min(minNow[k], minOld[k])) noise[k] = NOISE_KEEP * noise[k] + (1 - NOISE_KEEP) * power[k];
+      const gamma = pw / Math.max(raise * noise[k], 1e-14);   // signal-to-noise in this bin now
       const xi = DD * prevClean[k] + (1 - DD) * Math.max(gamma - 1, 0);
       const wiener = xi / (1 + xi);
       prevClean[k] = wiener * wiener * gamma;
-      const g = floor >= 1 ? 1 : Math.max(wiener, floor);
+      rawGain[k] = Math.sqrt(wiener);
+    }
+    for (let k = 0; k < BINS; k++) {
+      const lo = rawGain[k > 0 ? k - 1 : k], hi = rawGain[k < BINS - 1 ? k + 1 : k];
+      const target = (lo + 2 * rawGain[k] + hi) / 4;
+      gain[k] = target > gain[k] ? target : gain[k] + (target - gain[k]) * GAIN_FALL;
+      const g = floor >= 1 ? 1 : Math.max(Math.min(gain[k], rumble[k]), floor);
       re[k] *= g; im[k] *= g;
       if (k > 0 && k < N / 2) { re[N - k] = re[k]; im[N - k] = -im[k]; }
     }
@@ -108,7 +127,7 @@ class NoiseReduction extends AudioWorkletProcessor {
     if (!output || !output.length) return true;
     const strength = parameters.strength[0];
     const floor = strength <= 0 ? 1 : Math.pow(10, -strength * DB_PER_PERCENT / 20);
-    const bias = BIAS_MIN + BIAS_RANGE * strength / 100;
+    const raise = 1 + (RAISE_MAX - 1) * (strength / 100) ** 2;
     for (let c = 0; c < output.length; c++) {
       if (!this.channels[c]) this.channels[c] = new Channel();
       const ch = this.channels[c];
@@ -118,7 +137,7 @@ class NoiseReduction extends AudioWorkletProcessor {
         dst[i] = ch.out[ch.outRead++];
         ch.inRing[ch.inPos] = src ? src[i] : 0;
         ch.inPos = (ch.inPos + 1) % N;
-        if (++ch.sinceFrame === HOP) { ch.sinceFrame = 0; ch.frame(floor, bias); }
+        if (++ch.sinceFrame === HOP) { ch.sinceFrame = 0; ch.frame(floor, raise); }
       }
     }
     return true;

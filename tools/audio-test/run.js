@@ -9,7 +9,7 @@ const os = require('os');
 const path = require('path');
 const vm = require('vm');
 const { spawn, execFileSync } = require('child_process');
-const { SR, NOISE_DB, makeFixture, writeWav, makeVoice, makeNoise } = require('./signal');
+const { SR, NOISE_DB, makeFixture, writeWav, makeVoice, makeNoise, makeGustyFan } = require('./signal');
 
 const ROOT = path.join(__dirname, '..', '..');
 const RENDERER = path.join(ROOT, 'src', 'renderer');
@@ -64,6 +64,14 @@ function offlineChecks() {
     const row = [25, 60, 100].map(s => voiceChange(lvl, s));
     check(`voice at ${lvl} dB survives`, row[1] >= limit, `change at 25/60/100%: ${row.map(f1).join(' / ')} dB (limit at 60%: ${limit})`);
   }
+  const fan = makeGustyFan(n), level = x => { let e = 0; for (let i = SR * 6; i < n - LATENCY; i++) e += x[i] * x[i]; return toDb(e); };
+  const fanDrops = [25, 60, 100].map(s => level(fan) - level(runNr(fan, s)));
+  const fanVoice = makeVoice(n, -30, 8), mixed = fan.map((x, i) => x + fanVoice[i]), mixedOut = runNr(mixed, 60);
+  let num = 0, den = 0;
+  for (let i = start; i < n - LATENCY; i++) { num += mixedOut[i + LATENCY] * fanVoice[i]; den += fanVoice[i] * fanVoice[i]; }
+  const voiceOverFan = 20 * Math.log10(Math.max(num / den, 1e-6));
+  check('gusty fan rumble comes down', fanDrops[1] >= 10 && fanDrops[2] > fanDrops[0], `drop at 25/60/100%: ${fanDrops.map(f1).join(' / ')} dB (at least 10 at 60%)`);
+  check('voice survives over the fan', voiceOverFan >= -6, `${f1(voiceOverFan)} dB at 60% (limit -6)`);
 }
 
 // The gate's decisions, sample-exact: it comes before the compressor, so noise reduction + gate is all that decides.
@@ -159,7 +167,7 @@ const pageInfo = () => {
 };
 const pageNrLevels = async strength => {
   state.nr = strength > 0; state.nrAmount = strength; applyNr();
-  await new Promise(r => setTimeout(r, 2500));
+  await new Promise(r => setTimeout(r, 6000));         // the noise estimate has a ~4 s memory
   const a = audioCtx.createAnalyser(), b = audioCtx.createAnalyser(); a.fftSize = b.fftSize = 2048;
   srcNode.connect(a); eqNodes.nr.connect(b);
   const ba = new Float32Array(2048), bb = new Float32Array(2048), la = [], lb = [];
@@ -299,10 +307,11 @@ async function liveChecks(profile, wav, fixture) {
     }
 
     if (wanted('nr')) console.log('\nNoise reduction slider');
-    for (const s of wanted('nr') ? [0, 25, 60, 100] : []) {
-      const r = await copy.call(pageNrLevels, s);
-      const drop = r.raw - r.out, want = s * 0.3;
-      check(`${s}% lowers noise by ${want} dB`, Math.abs(drop - want) <= 1.5, `measured ${f1(drop)} dB (${f1(r.raw)} -> ${f1(r.out)})`);
+    const drops = [];
+    for (const [s, min, max] of wanted('nr') ? [[0, -0.5, 0.5], [25, 4, 9], [60, 9, 19], [100, 13, 31]] : []) {
+      const r = await copy.call(pageNrLevels, s), drop = r.raw - r.out;
+      check(`${s}% lowers steady noise by ${min}-${max} dB`, drop >= min && drop <= max && (!drops.length || drop > drops[drops.length - 1]), `measured ${f1(drop)} dB (${f1(r.raw)} -> ${f1(r.out)})`);
+      drops.push(drop);
     }
 
     if (wanted('gate')) {
