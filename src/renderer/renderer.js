@@ -123,6 +123,11 @@ function applyMonoTo(ch) {
   ch.input.channelCount = 1;
   ch.input.channelCountMode = state.mono ? 'explicit' : 'max';
   ch.input.channelInterpretation = 'speakers';
+  if (ch.voice) {                                // mono: the voice engine runs its network once, not per channel
+    ch.voice.channelCount = state.mono ? 1 : 2;
+    ch.voice.channelCountMode = state.mono ? 'explicit' : 'max';
+    ch.voice.channelInterpretation = 'speakers';
+  }
 }
 // With Windows control the captured audio already has the Windows level applied, so the app adds no gain.
 const volFactor = () => (curSys() ? 1 : state.volume / 75);
@@ -143,7 +148,8 @@ function applyCompTo(ch) {
 // volume -> gate -> [compressor] -> gateGain. The gate goes first: the compressor lifts noise by about 14 dB,
 // which left the gate open on noise alone (62% of the time, measured). Without the worklet, gateGain is the gate.
 function routeChain(ch) {
-  const path = [ch.volGain, ch.gate, state.comp && ch.comp, ch.gateGain].filter(Boolean);
+  const levelGate = ch.voice && state.gateAuto ? null : ch.gate;    // on Auto, the voice engine does the gating
+  const path = [ch.volGain, levelGate, state.comp && ch.comp, ch.gateGain].filter(Boolean);
   for (const node of [ch.volGain, ch.gate, ch.comp]) if (node) { try { node.disconnect(); } catch {} }
   path.reduce((a, b) => (a.connect(b), b));
 }
@@ -164,23 +170,31 @@ function updateMonitorGain() {
 let autoGateDb = -51;
 const gateDbNow = () => (state.gateAuto ? autoGateDb : state.gateDb);
 let shownGate = '';
-function updateGate() { refreshGateUi(); updateGateThreshold(); }
+function updateGate() {
+  refreshGateUi();
+  updateGateThreshold();
+  for (const ch of chains()) {
+    if (ch.voice) { ch.voice.parameters.get('gate').setValueAtTime(state.gateAuto ? 1 : 0, ch.ctx.currentTime); routeChain(ch); }
+  }
+}
 function refreshGateUi() {
   const t = Math.round(gateDbNow());
   $('gate').disabled = state.gateAuto;          // the slider keeps your manual setting while Auto is on
-  const label = (state.gateAuto ? 'Auto · ' : '') + t + ' dB';
+  const byVoice = state.gateAuto && eqNodes && eqNodes.voice;
+  $('gateMark').hidden = !!byVoice;             // a voice gate has no volume threshold to mark
+  const label = byVoice ? 'Auto · voice' : (state.gateAuto ? 'Auto · ' : '') + t + ' dB';
   if (label !== shownGate) {
     shownGate = label;
     $('gateVal').textContent = label;
     $('gateMark').style.left = dbToPct(t) + '%';
-    $('gateHint').textContent = state.gateAuto ? 'Mutes you when you go quiet; follows your background noise' : "Mutes you when you're quieter than this";
+    $('gateHint').textContent = byVoice ? 'Opens when it hears a voice, so fans and bumps stay out' : state.gateAuto ? 'Mutes you when you go quiet; follows your background noise' : "Mutes you when you're quieter than this";
   }
 }
 function updateHints() {
   $('nrHint').textContent = !state.nr ? 'Off'
     : !live ? `On · ${state.nrAmount}% (simulated)`
     : chains().some(ch => ch.nrFailed) ? 'Unavailable: the noise reduction engine could not start'
-    : `On · ${state.nrAmount}% · lowers fans, rumble and hiss. If your voice sounds thin or robotic, turn it down`;
+    : `On · ${state.nrAmount}% · lowers fans, rumble and hiss. Turn it down to mix some of your natural sound back in`;
   $('monHint').textContent = !state.monitor ? "Off: you won't hear yourself"
     : analyser ? `On · ${state.monitorVol}% · use headphones to avoid echo`
     : live ? 'On · microphone not open, nothing to play'
@@ -308,7 +322,7 @@ let eqSel = null;                                       // selected band key
 
 function audioCtxInit() {
   try {
-    audioCtx = new AudioContext({ latencyHint: 'interactive' });
+    audioCtx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
     eqNodes = buildChain(audioCtx);       // its analyser (~21 ms per reading) also drives the level meter
     eqNodes.monGain = eqNodes.outGain;     // Listen level
     buf = eqNodes.meterBuf;
@@ -341,7 +355,7 @@ function buildChain(ctx) {
   applyMonoTo(ch);
   applyEqTo(ch);
   attachGate(ch);                               // swaps in the audio-thread gate once it has loaded
-  attachNr(ch);                                 // and the noise reduction
+  attachVoice(ch);                              // and the voice cleanup (noise and, on Auto, the gate)
   return ch;
 }
 function applyEq() {
@@ -641,6 +655,7 @@ async function attachGate(ch) {
     const node = new AudioWorkletNode(ch.ctx, 'noise-gate', { numberOfInputs: 1, numberOfOutputs: 1, parameterData: { threshold: state.gateDb, auto: state.gateAuto ? 1 : 0 } });
     node.port.onmessage = e => {
       const d = e.data || {};
+      if (ch.voice && state.gateAuto) return;       // the voice engine reports open/closed instead
       ch.gateIsOpen = !!d.open;
       if (ch === eqNodes && typeof d.threshold === 'number') autoGateDb = d.threshold;   // learned on the main chain
     };
@@ -661,6 +676,30 @@ function detachGate(ch) {                         // worklet crashed: fall back 
   routeChain(ch);
   ch.gateIsOpen = !ch.gateIsOpen; gateChain(ch, 0, performance.now());
 }
+// ---- Voice cleanup (trial) ----
+// voice-worklet.js: RNNoise plus a gate that opens on detected voice. If it can't run, nr-worklet.js and the volume gate remain.
+const VOICE_WORKLET_URL = window.VOICE_WORKLET_URL || (location.protocol === 'file:' ? 'app://local/voice-worklet.js' : 'voice-worklet.js');
+async function attachVoice(ch) {
+  try {
+    if (ch.ctx.sampleRate !== 48000) throw new Error('needs 48 kHz, got ' + ch.ctx.sampleRate);
+    await ch.ctx.audioWorklet.addModule(VOICE_WORKLET_URL);
+    if (ch.ctx.state === 'closed') return;
+    const node = new AudioWorkletNode(ch.ctx, 'voice-cleanup', { numberOfInputs: 1, numberOfOutputs: 1, parameterData: { strength: nrStrengthNow(), gate: state.gateAuto ? 1 : 0 } });
+    node.port.onmessage = e => { if (state.gateAuto && typeof (e.data || {}).open === 'boolean') ch.gateIsOpen = e.data.open; };
+    node.onprocessorerror = () => { console.warn('Voice cleanup crashed; using the older noise reduction'); detachNr(ch); ch.voice = null; routeChain(ch); attachNr(ch); refreshGateUi(); };
+    ch.nr = node; ch.voice = node;
+    applyMonoTo(ch);
+    ch.head.disconnect();
+    ch.head.connect(node);
+    node.connect(ch.hp);
+    routeChain(ch);
+    shownGate = ''; refreshGateUi();
+  } catch (err) {
+    console.warn('Voice cleanup unavailable, using the older noise reduction:', err && err.message);
+    attachNr(ch);
+  }
+}
+
 // ---- Noise reduction ----
 // nr-worklet.js on the raw mic. Strength never rebuilds anything, so moving the slider doesn't interrupt the audio.
 async function attachNr(ch) {
@@ -864,7 +903,7 @@ async function setSend(on) {
       // New low-latency audio engine whose output device is the cable itself.
       sendHint('Connecting…');
       state.send = false; teardownSend();
-      const ctx = new AudioContext({ latencyHint: 'interactive' });
+      const ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
       try {
         await ctx.setSinkId(cable.deviceId);
         if (ctx.state === 'suspended') await ctx.resume();
