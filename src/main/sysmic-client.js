@@ -1,4 +1,4 @@
-// Runs the Windows audio helper (win-audio.ps1) and talks to it over stdin/stdout.
+// Runs the Windows audio helper (win-audio.exe, or win-audio.ps1 as the fallback) and talks to it over stdin/stdout.
 // One request per line "id<TAB>cmd<TAB>args...", one JSON reply per line.
 const { spawn } = require('child_process');
 

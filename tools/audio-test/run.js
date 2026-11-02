@@ -45,6 +45,25 @@ function runNr(input, strength) {
   }
   return out;
 }
+// The Windows helper: the compiled exe and the PowerShell fallback must both answer.
+async function helperChecks() {
+  console.log('\nWindows audio helper');
+  const { HelperClient } = require(path.join(ROOT, 'src', 'main', 'sysmic-client.js'));
+  const main = path.join(ROOT, 'src', 'main');
+  for (const [name, cmd, args] of [['compiled helper', path.join(main, 'win-audio.exe'), []], ['PowerShell fallback', 'powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-MTA', '-ExecutionPolicy', 'Bypass', '-File', path.join(main, 'win-audio.ps1')]]]) {
+    const h = new HelperClient(cmd, args), t0 = Date.now();
+    try {
+      const list = await h.call('list');
+      const one = await h.call('get', list[0].id);
+      const pid = h.proc.pid; h.proc.stdin.end();
+      await sleep(800);
+      let alive = true; try { process.kill(pid, 0); } catch { alive = false; }
+      check(`${name} answers and exits with the app`, Array.isArray(list) && list.length > 0 && one.id === list[0].id && !alive, `${list.length} devices, first answer in ${Date.now() - t0 - 800} ms, still running after stdin closed: ${alive}`);
+      if (alive) h.proc.kill();
+    } catch (err) { check(`${name} answers and exits with the app`, false, err.message); h.stop(); }
+  }
+}
+
 function offlineChecks() {
   console.log('\nFallback noise reduction, offline (used if the voice engine cannot start)');
   const LATENCY = 1024, n = SR * 24, start = SR * 8;
@@ -503,6 +522,7 @@ async function liveChecks(profile, wav, fixture) {
   writeWav(wav, fixture.samples);
   console.log(`Test signal: ${fixture.seconds} s, steady noise at ${NOISE_DB} dB, speech-like phrases at ${fixture.voiceLevels.join(', ')} dB`);
   try {
+    if (wanted('app')) await helperChecks();
     if (wanted('nr')) { voiceChecks(); offlineChecks(); }
     if (wanted('gate')) gateChecks(fixture);
     await liveChecks(path.join(dir, 'profile'), wav, fixture);

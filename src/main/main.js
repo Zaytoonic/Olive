@@ -29,16 +29,19 @@ function serveWorklet(request) {
 }
 const { HelperClient } = require('./sysmic-client');
 
-// ---- Windows microphone control (volume + mute) via win-audio.ps1 ----
+// ---- Windows microphone control (volume + mute) via the win-audio helper ----
+const HELPER_EXE = path.join(__dirname, 'win-audio.exe');
 let helper = null;
 function getHelper(allowRestart) {
   if (process.platform !== 'win32') return null;
   if (!helper || (helper.dead && allowRestart)) {
     if (helper) helper.stop();
-    helper = new HelperClient('powershell.exe', [
-      '-NoLogo', '-NoProfile', '-NonInteractive', '-MTA', '-ExecutionPolicy', 'Bypass',   // MTA: firmware events arrive without a message loop
-      '-File', path.join(__dirname, 'win-audio.ps1')
-    ]);
+    helper = fs.existsSync(HELPER_EXE)
+      ? new HelperClient(HELPER_EXE, [])
+      : new HelperClient('powershell.exe', [
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-MTA', '-ExecutionPolicy', 'Bypass',   // MTA: firmware events arrive without a message loop
+        '-File', path.join(__dirname, 'win-audio.ps1')
+      ]);
     helper.onEvent = ev => { if (ev === 'mic-key' && win && !win.isDestroyed()) win.webContents.send('mute:mic-key'); };
   }
   return helper;
