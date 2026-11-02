@@ -12,7 +12,7 @@ let live = false;            // true when devices come from the system
 const state = {
   deviceId: MOCK_DEVICES.find(d => d.isDefault).id,
   volume: 75, muted: false, gateDb: -45, gateAuto: true,
-  nr: true, nrAmount: 60, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50
+  nr: true, nrAmount: 60, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true
 };
 
 const $ = id => document.getElementById(id);
@@ -63,7 +63,7 @@ function bindControls() {
   $('gate').addEventListener('input', e => { state.gateDb = +e.target.value; updateGate(); });
   $('gateAuto').addEventListener('change', e => { state.gateAuto = e.target.checked; updateGate(); });
   $('muteBtn').addEventListener('click', toggleMute);
-  document.addEventListener('keydown', e => { if (e.ctrlKey && e.key.toLowerCase() === 'm') toggleMute(); });
+  document.addEventListener('keydown', e => { if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'm') toggleMute(); });
 
   $('nrToggle').addEventListener('change', e => { state.nr = e.target.checked; $('nrAmount').disabled = !state.nr; applyNr(); updateHints(); });
   $('nrAmount').addEventListener('input', e => { state.nrAmount = +e.target.value; applyNr(); updateHints(); });
@@ -92,6 +92,7 @@ function setMutedUi(m) {
   $('meterFill').parentElement.classList.toggle('muted', state.muted);
   updateMonitorGain();
   updateSendGain();
+  if (window.appMute) window.appMute.setState(state.muted);
 }
 function setMonitor(on) {
   state.monitor = on;
@@ -984,10 +985,12 @@ function pushSysVolume() {
     });
 }
 
-// Pick up changes made elsewhere (Windows Sound settings, other apps).
+// Pick up changes made elsewhere (Windows Sound settings, other apps). Less often while hidden; the tray icon still follows.
+let hiddenPolls = 0;
 async function pollSys() {
   const ep = curSys();
-  if (!ep || volInflight || isHidden() || performance.now() - sysTouched < 1500) return;
+  if (!ep || volInflight || performance.now() - sysTouched < 1500) return;
+  if (isHidden() && ++hiddenPolls % 5) return;
   try {
     const r = await sysApi.get(ep.id);
     if (performance.now() - sysTouched < 1500 || curSys() !== ep) return;   // user acted meanwhile
@@ -1017,6 +1020,7 @@ function loadPrefs() {
   state.monitorVol = num(p.monitorVol, 0, 100, state.monitorVol);
   state.comp = p.comp === true;
   state.compAmount = num(p.compAmount, 0, 100, state.compAmount);
+  state.muteHotkey = p.muteHotkey !== false;
   sendWanted = true;                             // Send to Discord is always on at launch;
   state.send = true;                             // loadDevices() connects the cable once devices are known
   devicesCollapsed = p.devicesCollapsed === true;
@@ -1069,7 +1073,7 @@ function savePrefs() {
   const p = {
     deviceId: prefDeviceId, deviceName: prefDeviceName, volume: state.volume, gateDb: state.gateDb, gateAuto: state.gateAuto, mono: state.mono, tunedVoice: 1,
     nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol, send: sendWanted,
-    comp: state.comp, compAmount: state.compAmount, devicesCollapsed,
+    comp: state.comp, compAmount: state.compAmount, devicesCollapsed, muteHotkey: state.muteHotkey,
     eq: { on: eq.on, lowCut: eq.lowCut, preset: $('eqPreset').value,
           bands: Object.fromEntries(EQ_BANDS.map(d => [d.key, { ...eq.b[d.key] }])) }
   };
@@ -1082,6 +1086,29 @@ document.addEventListener('input', scheduleSave);
 document.addEventListener('dblclick', scheduleSave);
 document.addEventListener('change', () => savePrefs());
 window.addEventListener('beforeunload', () => { if (saveTimer) savePrefs(); });
+
+// ---- Mute hotkey and tray ----
+// window.appMute comes from preload.js. The window may have been hidden for a while, so ask Windows for the
+// current mute state first: otherwise the toggle could go the wrong way after something else changed it.
+async function toggleMuteFromOutside() {
+  const ep = curSys();
+  if (ep) { try { storeSys(await sysApi.get(ep.id)); applySysToUi(); } catch { /* toggle from what we know */ } }
+  toggleMute();
+}
+async function applyMuteHotkey() {
+  const hint = $('muteKeyHint');
+  if (!state.muteHotkey) { await window.appMute.setHotkey(false); hint.textContent = 'Off: Ctrl+M still works while this window has focus'; return; }
+  const ok = await window.appMute.setHotkey(true);
+  hint.textContent = ok ? 'Ctrl+Alt+M mutes your mic from anywhere' : 'Ctrl+Alt+M is already in use by another app';
+}
+function initMuteHotkey() {
+  const t = $('muteKeyToggle');
+  if (!window.appMute) { t.disabled = true; t.checked = false; $('muteKeyHint').textContent = 'Only in the Windows app'; return; }
+  window.appMute.onToggle(toggleMuteFromOutside);
+  t.checked = state.muteHotkey;
+  t.addEventListener('change', () => { state.muteHotkey = t.checked; applyMuteHotkey(); });
+  applyMuteHotkey();
+}
 
 // ---- Start with Windows ----
 // window.appStartup comes from preload.js; Windows keeps the setting (Settings > Apps > Startup).
@@ -1130,6 +1157,7 @@ audioCtxInit();
 applyMono();
 bindControls(); bindEq(); updateGate(); updateHints(); updateCompHint(); paintRanges();
 initStartup();
+initMuteHotkey();
 ui.cover = $('meterCover'); ui.peak = $('meterPeak'); ui.levelDb = $('levelDb');
 setInterval(tick, 20);                 // audio + noise gate, 50x per second (keeps running in the tray)
 startDrawing();                        // meter drawing, only while the window is visible

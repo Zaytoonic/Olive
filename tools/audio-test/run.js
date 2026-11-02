@@ -3,7 +3,7 @@
 // Runs a separate hidden, muted copy of the app with its own temporary settings folder and a fake microphone
 // that plays a generated file. Your running app, your settings, your mic and the virtual cable are not touched.
 // During the EQ check its window opens briefly; a tray icon shows while it runs. Takes about 2 minutes.
-// Exit code 1 if any check fails. To run one part: npm run test:audio -- nr | gate | eq
+// Exit code 1 if any check fails. To run one part: npm run test:audio -- nr | gate | mute | eq
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -190,6 +190,27 @@ const pageCapture = async secs => {
   for (let i = 0; i < bytes.length; i += 32768) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
   return { sr: ctx.sampleRate, n, threshold: thresholds[thresholds.length >> 1], b64: btoa(s) };
 };
+// Loudest sample leaving the chain over some seconds, read after the output level (Listen on; the copy is muted).
+const pageOutPeak = async secs => {
+  const a = audioCtx.createAnalyser(), b = new Float32Array(2048); a.fftSize = 2048;
+  eqNodes.outGain.connect(a);
+  let pk = 0; const t0 = performance.now();
+  while (performance.now() - t0 < secs * 1000) {
+    a.getFloatTimeDomainData(b);
+    for (const v of b) { const m = Math.abs(v); if (m > pk) pk = m; }
+    await new Promise(r => setTimeout(r, 20));
+  }
+  eqNodes.outGain.disconnect(a);
+  return 20 * Math.log10(pk + 1e-9);
+};
+// Presses Ctrl+Alt+M for real, through Windows.
+function pressHotkey(holdRepeats = 0) {
+  const ps = "Add-Type -Name K -Namespace T -MemberDefinition '[DllImport(\"user32.dll\")] public static extern void keybd_event(byte v, byte s, uint f, UIntPtr e);';" +
+    "foreach ($k in 0x11,0x12,0x4D) { [T.K]::keybd_event($k,0,0,[UIntPtr]::Zero) };" +
+    (holdRepeats ? `Start-Sleep -Milliseconds 500; 1..${holdRepeats} | ForEach-Object { [T.K]::keybd_event(0x4D,0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 33 };` : 'Start-Sleep -Milliseconds 40;') +
+    "foreach ($k in 0x4D,0x12,0x11) { [T.K]::keybd_event($k,0,2,[UIntPtr]::Zero) }";
+  execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore' });
+}
 const pageEqStretch = async () => {
   const c = $('eqCurve'); let worst = 1, samples = 0; const t0 = performance.now();
   while (performance.now() - t0 < 1500) {
@@ -289,6 +310,32 @@ async function liveChecks(profile, wav, fixture) {
       check('gate shuts on noise', g.noise.openPct <= 30, `open ${f1(g.noise.openPct)}% of ${f1(g.noise.seconds)} s, ${g.noise.flips} flips`);
       check('speech reaches the end of the chain', g.voice[-25].openPct >= 80 && g.voice[-25].endLevel > g.noise.nrLevel + 20, `open ${f1(g.voice[-25].openPct)}%, output ${f1(g.voice[-25].endLevel)} dB`);
       check('output does not clip', g.peakDb < -0.5, `peak ${f1(g.peakDb)} dB`);
+    }
+
+    if (wanted('mute')) {
+      console.log('\nMute');
+      await copy.call(() => { state.nr = true; state.nrAmount = 60; applyNr(); setMonitor(true); });
+      await sleep(7000);
+      const on = await copy.call(pageOutPeak, 14);       // longer than the file's 8 s without speech
+      check('sound flows when unmuted', on > -50, `output peak ${f1(on)} dB`);
+      await copy.call(() => toggleMute());
+      await sleep(300);
+      const off = await copy.call(pageOutPeak, 14);
+      check('muting silences the output', off < -90, `output peak ${f1(off)} dB`);
+      await copy.call(() => toggleMute());
+      const hotkey = await copy.call(() => $('muteKeyHint').textContent);
+      if (/in use/.test(hotkey)) {
+        console.log('  SKIP  hotkey press: another Mic Manager or app holds Ctrl+Alt+M');
+      } else {
+        const states = [await copy.call(() => state.muted)];
+        for (let i = 0; i < 2; i++) { pressHotkey(); await sleep(600); states.push(await copy.call(() => state.muted)); }
+        check('Ctrl+Alt+M toggles mute, once per press', states.join() === 'false,true,false', `mute state after each press: ${states.join(' -> ')}`);
+        pressHotkey(45); await sleep(800);               // like a real keyboard: press, 500 ms, then 2 s of repeats
+        const held = await copy.call(() => state.muted);
+        check('holding the keys toggles once', held === true, `muted after holding: ${held}`);
+        await copy.call(() => { if (state.muted) toggleMute(); });
+      }
+      await copy.call(() => setMonitor(false));
     }
 
     if (!wanted('eq')) return;

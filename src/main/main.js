@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, protocol } = require('electron');
+const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, protocol, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -111,14 +111,38 @@ function createWindow() {
   win.on('closed', () => { win = null; });
 }
 
-function createTray() {
-  tray = new Tray(nativeImage.createFromPath(path.join(ASSETS, 'tray-icon.png')));
-  tray.setToolTip('Mic Manager');
+// ---- Mute from anywhere: a system-wide hotkey and the tray. The page owns the mute state and reports it back. ----
+const MUTE_HOTKEY = 'Control+Alt+M';
+let muted = false, lastPress = 0;
+function requestMuteToggle() {
+  // Windows repeats a held hotkey (first repeat after about 500 ms), and each repeat restarts this wait,
+  // so holding the keys toggles once however long they stay down.
+  const now = Date.now(), repeat = now - lastPress < 600;
+  lastPress = now;
+  if (repeat) return;
+  if (win && !win.isDestroyed()) win.webContents.send('mute:toggle');
+}
+ipcMain.handle('mute:state', (event, on) => { muted = on === true; updateTray(); });
+ipcMain.handle('mute:hotkey', (event, on) => {
+  if (globalShortcut.isRegistered(MUTE_HOTKEY)) globalShortcut.unregister(MUTE_HOTKEY);
+  return on === true ? globalShortcut.register(MUTE_HOTKEY, requestMuteToggle) : false;   // false if another app holds it
+});
+
+function updateTray() {
+  if (!tray) return;
+  tray.setImage(nativeImage.createFromPath(path.join(ASSETS, muted ? 'tray-icon-muted.png' : 'tray-icon.png')));
+  tray.setToolTip(muted ? 'Mic Manager: muted' : 'Mic Manager');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Mic Manager', click: showWindow },
+    { label: 'Mute microphone', type: 'checkbox', checked: muted, click: requestMuteToggle },
     { type: 'separator' },
     { label: 'Quit', click: quitApp }
   ]));
+}
+
+function createTray() {
+  tray = new Tray(nativeImage.createFromPath(path.join(ASSETS, 'tray-icon.png')));
+  updateTray();
   tray.on('click', showWindow);
   tray.on('double-click', showWindow);
 }
@@ -140,6 +164,6 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('before-quit', () => { quitting = true; });   // Windows shutdown / sign-out also quits for real
-  app.on('will-quit', () => { if (helper) helper.stop(); });
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (helper) helper.stop(); });
   app.on('window-all-closed', () => { if (quitting && process.platform !== 'darwin') app.quit(); });
 }
