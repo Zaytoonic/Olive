@@ -7,6 +7,8 @@
 //   (speech always has short gaps, so this lands on the background), and the threshold sits 9 dB above it,
 //   kept between -70 and -25 dBFS. Adapts to a new room within ~6 s. Measured on a real voice: a 3 s window let
 //   the threshold climb during continuous talking, and a larger margin cut quiet words.
+//   Digital silence (before the mic connects, between mics, Windows mute) wipes the memory rather than counting as
+//   a very quiet room, so the threshold is right within a few hundred ms of the next sound.
 // Threshold (dBFS, used when auto = 0) and auto are AudioParams; open/closed changes and the automatic
 // threshold are posted to the page for the meter.
 
@@ -37,7 +39,7 @@ class NoiseGate extends AudioWorkletProcessor {
     this.autoThr = -51;
     this.slot = Math.round(sr * 0.1);                  // 100 ms slots, 60 of them = 6 s window
     this.mins = new Float32Array(60).fill(-60);
-    this.slotPeak = 0; this.slotFill = 0; this.slotIdx = 0;
+    this.slotPeak = 0; this.slotFill = 0; this.slotIdx = 0; this.slotsKnown = 0;
     this.sinceReport = 0;
     this.port.postMessage({ open: false, threshold: this.autoThr });
   }
@@ -75,12 +77,16 @@ class NoiseGate extends AudioWorkletProcessor {
     if (this.slotFill === 0 || blockDb > this.slotPeak) this.slotPeak = blockDb;
     this.slotFill += n;
     if (this.slotFill >= this.slot) {
-      this.mins[this.slotIdx] = this.slotPeak;
-      this.slotIdx = (this.slotIdx + 1) % this.mins.length;
       this.slotFill = 0;
-      let lo = Infinity; for (let i = 0; i < this.mins.length; i++) if (this.mins[i] < lo) lo = this.mins[i];
-      this.floor = Math.min(-35, Math.max(-90, lo));
-      this.autoThr = Math.min(-25, Math.max(-70, this.floor + 9));
+      if (this.slotPeak < -100) { this.slotsKnown = 0; this.slotIdx = 0; }   // silence: forget this room
+      else {
+        this.mins[this.slotIdx] = this.slotPeak;
+        this.slotIdx = (this.slotIdx + 1) % this.mins.length;
+        if (this.slotsKnown < this.mins.length) this.slotsKnown++;
+        let lo = Infinity; for (let i = 0; i < this.slotsKnown; i++) if (this.mins[i] < lo) lo = this.mins[i];
+        this.floor = Math.min(-35, Math.max(-90, lo));
+        this.autoThr = Math.min(-25, Math.max(-70, this.floor + 9));
+      }
     }
     const open = hold > 0;
     this.sinceReport += n;
