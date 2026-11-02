@@ -47,6 +47,7 @@ class NoiseGate extends AudioWorkletProcessor {
   process(inputs, outputs, parameters) {
     const input = inputs[0], output = outputs[0];
     if (!output || !output.length) return true;
+    if (!input || !input.length) return true;          // not in the signal path right now (the voice engine is gating)
     const n = output[0].length;
     const auto = parameters.auto[0] >= 0.5;
     const thr = Math.pow(10, (auto ? this.autoThr : parameters.threshold[0]) / 20);
