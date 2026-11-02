@@ -3,7 +3,7 @@
 // Runs a separate hidden, muted copy of the app with its own temporary settings folder and a fake microphone
 // that plays a generated file. Your running app, your settings, your mic and the virtual cable are not touched.
 // During the EQ check its window opens briefly; a tray icon shows while it runs. Takes about 2 minutes.
-// Exit code 1 if any check fails. To run one part: npm run test:audio -- nr | gate | mute | eq
+// Exit code 1 if any check fails. To run one part: npm run test:audio -- nr | gate | mute | eq | app
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -291,6 +291,12 @@ async function liveChecks(profile, wav, fixture) {
     const info = await copy.call(pageInfo);
     check('mic is captured raw', info.suppression === false, `Chromium noise suppression reports ${info.suppression}`);
     check('nothing reaches the real cable', info.sendConnected === false, `send chain connected: ${info.sendConnected}`);
+
+    if (wanted('app')) {
+      console.log('\nStart with Windows');
+      const startup = await copy.call(async () => ({ api: await window.appStartup.get(), disabled: $('startupToggle').disabled, hint: $('startupHint').textContent }));
+      check('a copy run from source cannot register itself at login', startup.api.supported === false && startup.disabled, `toggle disabled: ${startup.disabled}, hint: "${startup.hint}"`);
+    }
 
     if (wanted('nr')) console.log('\nNoise reduction slider');
     for (const s of wanted('nr') ? [0, 25, 60, 100] : []) {

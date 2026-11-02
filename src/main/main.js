@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, protocol, globalShortcut } = require('electron');
+const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, protocol, globalShortcut, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -52,12 +52,16 @@ ipcMain.handle('sysmic', (event, cmd, ...args) => {
 const HIDDEN_ARG = '--hidden';
 const startedHidden = process.argv.includes(HIDDEN_ARG);
 const loginItemOpts = () => ({ path: process.execPath, args: [HIDDEN_ARG] });
+// Only the built app may register itself. From source (npm start) process.execPath is the bare electron.exe, which
+// at login has no app to load and opens Electron's "run this command" welcome window.
 ipcMain.handle('startup:get', () => {
   if (process.platform !== 'win32') return { supported: false, enabled: false };
+  if (!app.isPackaged) return { supported: false, enabled: false, reason: 'Only in the built app (MicManager.exe)' };
   return { supported: true, enabled: !!app.getLoginItemSettings(loginItemOpts()).openAtLogin };
 });
 ipcMain.handle('startup:set', (event, on) => {
   if (process.platform !== 'win32') throw new Error('Windows only');
+  if (!app.isPackaged) throw new Error('Only in the built app (MicManager.exe)');
   app.setLoginItemSettings({ openAtLogin: on === true, ...loginItemOpts() });
   return { supported: true, enabled: !!app.getLoginItemSettings(loginItemOpts()).openAtLogin };
 });
@@ -78,8 +82,9 @@ function quitApp() {
 }
 
 function createWindow() {
+  const area = screen.getPrimaryDisplay().workAreaSize;   // smaller screens get a window that still fits
   win = new BrowserWindow({
-    width: 980, height: 680, minWidth: 760, minHeight: 560,
+    width: Math.min(1120, area.width), height: Math.min(780, area.height), minWidth: 760, minHeight: 560,
     backgroundColor: '#0f1115', title: 'Mic Manager', autoHideMenuBar: true,
     show: false,                               // shown on ready-to-show, unless started hidden at login
     icon: path.join(ASSETS, 'icon.png'),
