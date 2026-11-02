@@ -31,13 +31,18 @@
       <div class="hero group">
         <div class="current">
           <div class="current-text">
-            <div class="caption">Selected microphone</div>
-            <div id="currentName" class="current-name">—</div>
+            <label for="micSelect" class="caption">Selected microphone</label>
+            <select id="micSelect" class="current-name" title="Choose a microphone"></select>
+            <div id="micNotice" class="hint notice"></div>
           </div>
           <div class="current-actions">
             <button id="listenBtn" class="pill listen" aria-pressed="false" title="Hear your mic live (use headphones)">Listen</button>
             <button id="muteBtn" class="pill mute" aria-pressed="false" title="Toggle mute (Ctrl+M)">Mute</button>
           </div>
+        </div>
+        <div id="mutedBanner" class="muted-banner" role="status" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5a2.5 2.5 0 0 0-2.5 2.5v5a2.5 2.5 0 0 0 5 0V5A2.5 2.5 0 0 0 10 2.5z"/><path d="M5 9.5a5 5 0 0 0 10 0M10 14.5v3"/><line x1="3" y1="3" x2="17" y2="17"/></svg>
+          <span>Muted. Nobody can hear you.</span>
         </div>
         <div class="meter-block">
           <div class="row-head"><span class="caption">Input level</span><span id="levelDb" class="value mono">-∞ dB</span></div>
@@ -51,6 +56,8 @@
         </div>
       </div>
 
+      <div class="columns">
+      <div class="col">
       <h3 class="group-title">Microphone</h3>
       <div class="group">
         <div class="row stack control">
@@ -78,6 +85,10 @@
           <div>
             <div class="row-title">Send to Discord / other apps</div>
             <div class="hint" id="sendHint">Off: other apps hear your raw mic</div>
+            <div class="send-level" id="sendLevel" hidden>
+              <div class="mini-meter" title="The level other apps receive"><div class="mini-fill"></div><div class="mini-cover" id="sendCover"></div></div>
+              <span class="value mono" id="sendDb">-∞ dB</span>
+            </div>
           </div>
           <label class="switch" title="Send the processed mic to VB-Audio Virtual Cable"><input type="checkbox" id="sendToggle" checked><span></span></label>
         </div>
@@ -90,12 +101,14 @@
         </div>
       </div>
 
+      </div>
+      <div class="col">
       <h3 class="group-title">Processing</h3>
       <div class="group">
         <div class="row card">
           <div class="row-head">
             <span class="row-title">Noise reduction</span>
-            <label class="switch" title="Automatic noise reduction"><input type="checkbox" id="nrToggle" checked><span></span></label>
+            <div class="row-end"><span class="value" id="nrVal"></span><label class="switch" title="Automatic noise reduction"><input type="checkbox" id="nrToggle" checked><span></span></label></div>
           </div>
           <input type="range" id="nrAmount" min="0" max="100" value="100" aria-label="Noise reduction strength">
           <div class="hint" id="nrHint">On</div>
@@ -103,7 +116,7 @@
         <div class="row card comp">
           <div class="row-head">
             <span class="row-title">Compressor / auto-level</span>
-            <label class="switch" title="Even out your volume"><input type="checkbox" id="compToggle"><span></span></label>
+            <div class="row-end"><span class="value" id="compVal"></span><label class="switch" title="Even out your volume"><input type="checkbox" id="compToggle"><span></span></label></div>
           </div>
           <input type="range" id="compAmount" min="0" max="100" value="50" disabled aria-label="Compressor strength">
           <div class="hint" id="compHint">Off: your volume goes out as-is</div>
@@ -111,36 +124,10 @@
         <div class="row card">
           <div class="row-head">
             <span class="row-title">Mic monitoring</span>
-            <label class="switch" title="Hear yourself"><input type="checkbox" id="monToggle"><span></span></label>
+            <div class="row-end"><span class="value" id="monVal"></span><label class="switch" title="Hear yourself"><input type="checkbox" id="monToggle"><span></span></label></div>
           </div>
           <input type="range" id="monVol" min="0" max="100" value="80" disabled aria-label="Monitoring level">
           <div class="hint" id="monHint">Off: you won't hear yourself</div>
-        </div>
-      </div>
-
-      <h3 class="group-title">Equalizer</h3>
-      <div class="group">
-        <div class="row card eq">
-          <div class="row-head">
-            <span class="row-title">Mic EQ</span>
-            <div class="eq-head">
-              <select id="eqPreset" title="Preset">
-                <option value="myvoice">My voice (tuned)</option>
-                <option value="flat">Flat</option>
-                <option value="clarity">Voice clarity</option>
-                <option value="broadcast">Broadcast</option>
-                <option value="boom">Reduce boom</option>
-                <option value="custom" hidden>Custom</option>
-              </select>
-              <label class="switch" title="Enable EQ"><input type="checkbox" id="eqToggle" checked><span></span></label>
-            </div>
-          </div>
-          <canvas id="eqCurve" width="600" height="220" tabindex="0" aria-label="EQ graph: drag points to shape your sound"></canvas>
-          <div class="eq-tools">
-            <div class="eq-chips" id="eqChips" role="tablist" aria-label="EQ bands"></div>
-            <div class="eq-readout" id="eqReadout" aria-live="polite"></div>
-          </div>
-          <label class="lowcut"><input type="checkbox" id="lowCut"> Low cut (80 Hz) · removes rumble and desk thumps</label>
         </div>
       </div>
 
@@ -159,6 +146,37 @@
             <div class="hint" id="startupHint">Opens hidden in the tray when you log in</div>
           </div>
           <label class="switch" title="Launch Mic Manager when you log in"><input type="checkbox" id="startupToggle"><span></span></label>
+        </div>
+      </div>
+      </div>
+      </div>
+
+      <h3 class="group-title">Equalizer</h3>
+      <div class="group">
+        <div class="row card eq">
+          <div class="row-head">
+            <div class="eq-title">
+              <span class="row-title">Mic EQ</span>
+              <div class="hint" id="eqFor"></div>
+            </div>
+            <div class="eq-head">
+              <select id="eqPreset" title="Preset">
+                <option value="myvoice">My voice (tuned)</option>
+                <option value="flat">Flat</option>
+                <option value="clarity">Voice clarity</option>
+                <option value="broadcast">Broadcast</option>
+                <option value="boom">Reduce boom</option>
+                <option value="custom" hidden>Custom</option>
+              </select>
+              <label class="switch" title="Enable EQ"><input type="checkbox" id="eqToggle" checked><span></span></label>
+            </div>
+          </div>
+          <canvas id="eqCurve" width="600" height="220" tabindex="0" aria-label="EQ graph: drag points to shape your sound"></canvas>
+          <div class="eq-tools">
+            <div class="eq-chips" id="eqChips" role="tablist" aria-label="EQ bands"></div>
+            <div class="eq-readout" id="eqReadout" aria-live="polite"></div>
+          </div>
+          <label class="lowcut"><input type="checkbox" id="lowCut"> Low cut (80 Hz) · removes rumble and desk thumps</label>
         </div>
       </div>
     </section>

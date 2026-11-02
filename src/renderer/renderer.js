@@ -1,4 +1,4 @@
-// Mic Manager v1.3: real input devices, live metering + monitoring, mock fallback. Microphones only.
+// Mic Manager: real input devices, live metering + monitoring, mock fallback. Microphones only.
 
 const MOCK_DEVICES = [
   { id: 'mic-1', name: 'USB Condenser Microphone', driver: 'USB Audio', channels: 'Mono · 48 kHz', isDefault: true, noise: 0.012, voice: 0.55 },
@@ -32,26 +32,40 @@ function renderDevices() {
     if (d.id === state.deviceId) li.classList.add('selected');
     li.innerHTML = `<span class="dev-name"></span><span class="dev-meta"></span>`;
     li.querySelector('.dev-name').textContent = d.name;
-    li.querySelector('.dev-meta').innerHTML =
-      `${[d.driver, d.channels].filter(Boolean).join(' · ')}${d.isDefault ? ' · <span class="dev-default">Default</span>' : ''}`;
+    const preferred = live && d === preferredDevice();
+    li.querySelector('.dev-meta').innerHTML = [d.driver, d.channels].filter(Boolean)
+      .concat(d.isDefault ? '<span class="dev-default">Windows default</span>' : [], preferred ? '<span class="dev-default">Preferred</span>' : [])
+      .join(' · ');
     const pick = () => selectDevice(d.id);
     li.addEventListener('click', pick);
     li.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
     list.appendChild(li);
   }
+  const pick = $('micSelect');
+  pick.innerHTML = '';
+  for (const d of devices) pick.add(new Option(d.name, d.id, false, d.id === state.deviceId));
+  $('micNotice').textContent = live && prefDeviceName && !preferredDevice()
+    ? `${prefDeviceName} isn't connected. Using ${currentDevice().name} until it's back.` : '';
 }
 function selectDevice(id) {
   state.deviceId = id;
   prefDeviceId = id;
   prefDeviceName = (devices.find(d => d.id === id) || {}).name || null;
+  if (live) switchEqTo(prefDeviceName);
   savePrefs();
   peak = MIN_DB; smoothed = MIN_DB;
   renderDevices();
-  $('currentName').textContent = currentDevice().name;
   applySysToUi();
   if (live) startCapture();
 }
 const currentDevice = () => devices.find(d => d.id === state.deviceId) || devices[0];
+// The mic you chose, if it's connected right now. Device IDs can change between launches, so its name counts too.
+function preferredDevice() {
+  const byId = devices.find(d => d.id === prefDeviceId);
+  if (byId) return byId;
+  const byName = prefDeviceName ? devices.filter(d => d.name === prefDeviceName) : [];
+  return byName.length === 1 ? byName[0] : null;
+}
 
 // ---- Controls ----
 function bindControls() {
@@ -72,8 +86,8 @@ function bindControls() {
   $('monoToggle').addEventListener('change', e => { state.mono = e.target.checked; applyMono(); });
   $('sendToggle').addEventListener('change', e => { sendWanted = e.target.checked; scheduleSave(); setSend(e.target.checked); });
   $('monVol').addEventListener('input', e => { state.monitorVol = +e.target.value; updateMonitorGain(); updateHints(); });
-  $('compToggle').addEventListener('change', e => { state.comp = e.target.checked; $('compAmount').disabled = !state.comp; applyComp(); });
-  $('compAmount').addEventListener('input', e => { state.compAmount = +e.target.value; applyComp(); });
+  $('compToggle').addEventListener('change', e => { state.comp = e.target.checked; $('compAmount').disabled = !state.comp; applyComp(); updateHints(); });
+  $('compAmount').addEventListener('input', e => { state.compAmount = +e.target.value; applyComp(); updateHints(); });
 }
 function toggleMute() { setAllMuted(!state.muted); }
 // Mute means everything agrees: the app, the selected mic, and the Windows recording devices Discord could listen to
@@ -94,8 +108,11 @@ function setMutedUi(m) {
   b.textContent = state.muted ? 'Muted' : 'Mute';
   b.setAttribute('aria-pressed', state.muted);
   $('meterFill').parentElement.classList.toggle('muted', state.muted);
+  $('mutedBanner').hidden = !state.muted;
+  $('meterFill').closest('.hero').classList.toggle('is-muted', state.muted);
   updateMonitorGain();
   updateSendGain();
+  updateSendStatus();
   if (window.appMute) window.appMute.setState(state.muted);
 }
 function setMonitor(on) {
@@ -183,10 +200,10 @@ function applyComp() {
   updateCompHint();
 }
 function updateCompHint() {
-  if (!state.comp) { $('compHint').textContent = 'Off: your volume goes out as-is'; return; }
+  if (!state.comp) { $('compHint').textContent = 'Your volume goes out as-is'; return; }
   const mc = eqNodes && meterChain();
   const r = mc && typeof mc.comp.reduction === 'number' ? mc.comp.reduction : 0;
-  $('compHint').textContent = `On · strength ${state.compAmount}%` + (r < -0.5 ? ` · evening out ${(-r).toFixed(1)} dB` : '');
+  $('compHint').textContent = r < -0.5 ? `Evening out ${(-r).toFixed(1)} dB` : 'Evens out your volume';
 }
 function updateVolumeGain() { chains().forEach(ch => rampTo(ch.volGain.gain, volFactor(), 0.02, ch.ctx)); }
 function updateMonitorGain() {
@@ -217,12 +234,15 @@ function refreshGateUi() {
   }
 }
 function updateHints() {
-  $('nrHint').textContent = !state.nr ? 'Off'
-    : !live ? `On · ${state.nrAmount}% (simulated)`
+  $('nrVal').textContent = state.nr ? state.nrAmount + '%' : 'Off';
+  $('compVal').textContent = state.comp ? state.compAmount + '%' : 'Off';
+  $('monVal').textContent = state.monitor ? state.monitorVol + '%' : 'Off';
+  $('nrHint').textContent = !state.nr ? 'Off: nothing is removed'
+    : !live ? 'Simulated (mock mode)'
     : chains().some(ch => ch.nrFailed) ? 'Unavailable: the noise reduction engine could not start'
-    : `On · ${state.nrAmount}% · lowers fans, rumble and hiss. Turn it down to mix some of your natural sound back in`;
-  $('monHint').textContent = !state.monitor ? "Off: you won't hear yourself"
-    : analyser ? `On · ${state.monitorVol}% · use headphones to avoid echo`
+    : 'Lowers fans, rumble and hiss. Turn it down to mix your natural sound back in';
+  $('monHint').textContent = !state.monitor ? "You won't hear yourself"
+    : analyser ? 'Use headphones to avoid echo'
     : live ? 'On · microphone not open, nothing to play'
     : 'On · mock mode has no real mic to play';
 }
@@ -310,7 +330,23 @@ function draw(now) {
     dbShownAt = now;
     const t = state.muted ? 'Muted' : (smoothed <= MIN_DB ? '-∞ dB' : smoothed.toFixed(1) + ' dB');
     if (t !== shownDb) { ui.levelDb.textContent = t; shownDb = t; }
+    drawSendLevel();
   }
+}
+// Level other apps receive: the loudest moment since the last reading (10x per second), falling back slowly.
+let sendShown = MIN_DB, shownSendDb = '', shownSendCover = '';
+function drawSendLevel() {
+  if (!sendNodes || !state.send) return;
+  const b = sendNodes.meterBuf;
+  sendNodes.outMeter.getFloatTimeDomainData(b);
+  let sum = 0;
+  for (let i = 0; i < b.length; i++) sum += b[i] * b[i];
+  const db = Math.max(MIN_DB, ampToDb(Math.sqrt(sum / b.length) * 1.41));
+  sendShown = db > sendShown ? db : Math.max(db, sendShown - 4);
+  const cover = 'scaleX(' + (1 - dbToPct(sendShown) / 100).toFixed(3) + ')';
+  if (cover !== shownSendCover) { $('sendCover').style.transform = cover; shownSendCover = cover; }
+  const text = sendShown <= MIN_DB ? '-∞ dB' : sendShown.toFixed(1) + ' dB';
+  if (text !== shownSendDb) { $('sendDb').textContent = text; shownSendDb = text; }
 }
 
 let stream = null, srcNode = null, audioCtx = null, analyser = null, buf = null, captureToken = 0;
@@ -345,6 +381,39 @@ const bandDef = key => EQ_BANDS.find(d => d.key === key);
 function resetBand(key) { const d = bandDef(key); eq.b[key] = { f: d.freq, g: 0, q: d.q }; }
 EQ_BANDS.forEach(d => resetBand(d.key));
 let eqSel = null;                                       // selected band key
+// Each mic keeps its own EQ, stored by name. A mic seen for the first time starts from the EQ in use.
+const eqByMic = {};
+let eqOwner = null;                                     // the mic the EQ on screen belongs to
+function snapshotEq() {
+  return { on: eq.on, lowCut: eq.lowCut, preset: $('eqPreset').value, bands: Object.fromEntries(EQ_BANDS.map(d => [d.key, { ...eq.b[d.key] }])) };
+}
+function restoreEq(src) {
+  const num = (v, lo, hi, d) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
+  eq.on = src.on !== false;
+  eq.lowCut = src.lowCut === true;
+  for (const d of EQ_BANDS) {
+    const b = (src.bands && src.bands[d.key]) || {};
+    const legacy = src.gains && src.gains[d.key];       // settings saved by v1.1 and earlier
+    eq.b[d.key] = {
+      f: num(b.f, EQ_F_MIN, EQ_F_MAX, d.freq),
+      g: num(b.g !== undefined ? b.g : legacy, -EQ_G_MAX, EQ_G_MAX, 0),
+      q: num(b.q, EQ_Q_MIN, EQ_Q_MAX, d.q)
+    };
+  }
+  eqPresetPref = typeof src.preset === 'string' ? src.preset : 'flat';
+}
+function showEqPreset() {
+  const sel = $('eqPreset');
+  sel.value = [...sel.options].some(o => o.value === eqPresetPref) ? eqPresetPref : 'custom';
+}
+function switchEqTo(name) {
+  if (!name) return;
+  $('eqFor').textContent = 'Saved for ' + name;
+  if (name === eqOwner) return;
+  if (eqOwner) eqByMic[eqOwner] = snapshotEq();
+  eqOwner = name;
+  if (eqByMic[name]) { restoreEq(eqByMic[name]); showEqPreset(); syncEqUi(); }
+}
 
 function audioCtxInit() {
   try {
@@ -375,8 +444,11 @@ function buildChain(ctx) {
   const meter = ctx.createAnalyser();
   meter.fftSize = 1024;
   output.connect(meter);
+  const outMeter = ctx.createAnalyser();        // what actually leaves this chain, after gate, compressor and mute
+  outMeter.fftSize = 1024;
+  outGain.connect(outMeter);
   const ch = { ctx, head, hp, bands, input: hp, output, volGain, comp, compOn: null, gateGain, outGain,
-               meter, meterBuf: new Float32Array(meter.fftSize), gateIsOpen: false, holdUntil: 0 };
+               meter, meterBuf: new Float32Array(meter.fftSize), outMeter, gateIsOpen: false, holdUntil: 0 };
   applyCompTo(ch);                              // connects volume -> (compressor ->) gateGain
   applyMonoTo(ch);
   applyEqTo(ch);
@@ -809,6 +881,7 @@ function stopCapture() {
 async function startCapture() {
   const token = ++captureToken;
   stopCapture();
+  capturedId = null;
   try {
     const s = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -818,6 +891,7 @@ async function startCapture() {
     });
     if (token !== captureToken) { s.getTracks().forEach(tr => tr.stop()); return; }
     stream = s;
+    capturedId = state.deviceId;
     if (!audioCtx || !eqNodes) throw Object.assign(new Error('No audio engine'), { name: 'AudioEngineError' });
     if (mainNeeded() && audioCtx.state === 'suspended') await audioCtx.resume();
     srcNode = audioCtx.createMediaStreamSource(stream);
@@ -835,6 +909,8 @@ async function startCapture() {
 }
 
 function setStatus(msg) { $('devStatus').textContent = msg; }
+let capturedId = null;
+const captureIsCurrent = () => stream && capturedId === state.deviceId && stream.getAudioTracks().every(tr => tr.readyState === 'live');
 
 async function loadDevices() {
   setStatus('');
@@ -845,12 +921,14 @@ async function loadDevices() {
     probe.getTracks().forEach(tr => tr.stop());
     const all = await navigator.mediaDevices.enumerateDevices();
     const inputs = all.filter(d => d.kind === 'audioinput' && d.deviceId !== 'communications' && !isCableLabel(d.label));
-    const def = inputs.find(d => d.deviceId === 'default');
+    // The default entry's label is "Default - <device label>"; two mics on one sound card share a group, so match the label.
+    const defaultEntry = all.find(d => d.kind === 'audioinput' && d.deviceId === 'default');
+    const defaultLabel = defaultEntry ? defaultEntry.label.replace(/^[^-]*-\s*/, '') : null;
     found = inputs.filter(d => d.deviceId !== 'default').map(d => ({
       id: d.deviceId,
       name: d.label.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)$/i, '') || 'Microphone',
-      driver: 'System device', channels: '', noise: 0.02, voice: 0.45,
-      isDefault: !!def && d.groupId === def.groupId
+      driver: '', channels: '', noise: 0.02, voice: 0.45,
+      isDefault: d.label === defaultLabel
     }));
   } catch (err) {
     setStatus(`Microphone access unavailable (${err.name}). Using mock devices.`);
@@ -859,21 +937,19 @@ async function loadDevices() {
   live = found.length > 0;
   devices = live ? found : MOCK_DEVICES;
   if (!live && !$('devStatus').textContent) setStatus('No microphones found. Using mock devices.');
-  if (!devices.some(d => d.id === state.deviceId)) {
-    // Device IDs can change between launches; fall back to the saved mic's name, then the Windows default.
-    const byId = devices.find(d => d.id === prefDeviceId);
-    const byName = prefDeviceName ? devices.filter(d => d.name === prefDeviceName) : [];
-    const pick = byId || (byName.length === 1 && byName[0]) || devices.find(d => d.isDefault) || devices[0];
-    state.deviceId = pick.id;
-  }
+  // Your chosen mic whenever it's connected, so plugging it back in returns to it; otherwise stay put, or use the default.
+  const wanted = preferredDevice();
+  if (wanted) state.deviceId = wanted.id;
+  else if (!devices.some(d => d.id === state.deviceId)) state.deviceId = (devices.find(d => d.isDefault) || devices[0]).id;
+  if (live) switchEqTo(currentDevice().name);
 
   const badge = $('sourceBadge');
   badge.textContent = live ? 'Live input' : 'Mock audio';
   badge.classList.toggle('live', live);
   renderDevices();
-  $('currentName').textContent = currentDevice().name;
   updateHints();
-  if (live) startCapture(); else { stopCapture(); }
+  if (!live) stopCapture();
+  else if (!captureIsCurrent()) startCapture();
   syncSystem();
   if (sendWanted) setSend(true);   // (re)connect the cable at start-up, after a rescan or a device change
 }
@@ -890,6 +966,12 @@ function sendHint(text, cls) {
   $('sendToggle').parentElement.title = cls === 'on'
     ? 'Sending to the virtual cable. In Discord, choose "CABLE Output (VB-Audio Virtual Cable)" as your input device.'
     : 'Send the processed mic to VB-Audio Virtual Cable';
+}
+// What other apps get right now, in words. The level bar only shows while the cable is connected.
+function updateSendStatus() {
+  const connected = !!sendNodes && state.send && live;
+  $('sendLevel').hidden = !connected;
+  if (connected) sendHint(state.muted ? 'Muted: nothing is being sent' : 'Sending. In Discord, choose "CABLE Output" as your input', 'on');
 }
 function updateSendGain() {
   if (sendNodes) rampTo(sendNodes.outGain.gain, state.send && !state.muted ? 1 : 0, 0.02, sendCtx);
@@ -917,6 +999,7 @@ async function setSend(on) {
   if (!on) {
     state.send = false; updateSendGain(); teardownSend();
     $('sendToggle').checked = false; sendHint('Off: other apps hear your raw mic');
+    updateSendStatus();
     return;
   }
   $('sendToggle').checked = true;
@@ -927,6 +1010,7 @@ async function setSend(on) {
       state.send = false; teardownSend();
       $('sendToggle').checked = false;
       sendHint('VB-Audio Virtual Cable not found. Install it from vb-audio.com/Cable, restart the PC, then try again.', 'warn');
+      updateSendStatus();
       return;
     }
     if (!(sendNodes && sendCableId === cable.deviceId && sendCtx.state !== 'closed')) {
@@ -946,12 +1030,13 @@ async function setSend(on) {
     }
     state.send = true;
     updateSendGain();
-    sendHint(live ? '' : 'On · but mock mode has no real mic to send', live ? 'on' : 'warn');
+    if (live) updateSendStatus(); else sendHint('On · but mock mode has no real mic to send', 'warn');
   } catch (err) {
     if (token !== sendToken) return;
     state.send = false; teardownSend();
     $('sendToggle').checked = false;
     sendHint("Couldn't send to the virtual cable (" + (err.name || 'Error') + ': ' + err.message + ')', 'warn');
+    updateSendStatus();
   }
 }
 
@@ -1102,20 +1187,10 @@ function loadPrefs() {
   sendWanted = true;                             // Send to Discord is always on at launch;
   state.send = true;                             // loadDevices() connects the cable once devices are known
   devicesCollapsed = p.devicesCollapsed === true;
-  if (p.eq && typeof p.eq === 'object') {
-    eq.on = p.eq.on !== false;
-    eq.lowCut = p.eq.lowCut === true;
-    for (const d of EQ_BANDS) {
-      const src = (p.eq.bands && p.eq.bands[d.key]) || {};
-      const legacy = p.eq.gains && p.eq.gains[d.key];          // settings saved by v1.1 and earlier
-      eq.b[d.key] = {
-        f: num(src.f, EQ_F_MIN, EQ_F_MAX, d.freq),
-        g: num(src.g !== undefined ? src.g : legacy, -EQ_G_MAX, EQ_G_MAX, 0),
-        q: num(src.q, EQ_Q_MIN, EQ_Q_MAX, d.q)
-      };
-    }
-    eqPresetPref = typeof p.eq.preset === 'string' ? p.eq.preset : 'flat';
-  }
+  if (p.eqByMic && typeof p.eqByMic === 'object') Object.assign(eqByMic, p.eqByMic);
+  const startEq = (prefDeviceName && eqByMic[prefDeviceName]) || p.eq;
+  if (startEq && typeof startEq === 'object') restoreEq(startEq);
+  eqOwner = prefDeviceName;
   return p;
 }
 let eqPresetPref = 'flat';
@@ -1142,8 +1217,7 @@ function showPrefsInUi() {
   $('sendToggle').checked = state.send;
   if (state.send) sendHint('Connecting…');
   setDevicesCollapsed(devicesCollapsed);
-  const sel = $('eqPreset');
-  sel.value = [...sel.options].some(o => o.value === eqPresetPref) ? eqPresetPref : 'custom';
+  showEqPreset();
 }
 
 function savePrefs() {
@@ -1152,8 +1226,8 @@ function savePrefs() {
     deviceId: prefDeviceId, deviceName: prefDeviceName, volume: state.volume, gateDb: state.gateDb, gateAuto: state.gateAuto, mono: state.mono, tunedVoice: 1,
     nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol, send: sendWanted,
     comp: state.comp, compAmount: state.compAmount, devicesCollapsed, muteHotkey: state.muteHotkey,
-    eq: { on: eq.on, lowCut: eq.lowCut, preset: $('eqPreset').value,
-          bands: Object.fromEntries(EQ_BANDS.map(d => [d.key, { ...eq.b[d.key] }])) }
+    eq: snapshotEq(),
+    eqByMic: eqOwner ? { ...eqByMic, [eqOwner]: snapshotEq() } : eqByMic
   };
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch { /* storage unavailable: settings just won't persist */ }
 }
@@ -1251,7 +1325,7 @@ $('devToggle').addEventListener('click', () => { setDevicesCollapsed(!devicesCol
 applyTunedOnce(loadPrefs());
 showPrefsInUi();
 renderDevices();
-$('currentName').textContent = currentDevice().name;
+$('micSelect').addEventListener('change', e => selectDevice(e.target.value));
 audioCtxInit();
 applyMono();
 bindControls(); bindEq(); updateGate(); updateHints(); updateCompHint(); paintRanges();

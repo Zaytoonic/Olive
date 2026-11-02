@@ -347,6 +347,41 @@ async function liveChecks(profile, wav, fixture) {
       console.log('\nStart with Windows');
       const startup = await copy.call(async () => ({ api: await window.appStartup.get(), disabled: $('startupToggle').disabled, hint: $('startupHint').textContent }));
       check('a copy run from source cannot register itself at login', startup.api.supported === false && startup.disabled, `toggle disabled: ${startup.disabled}, hint: "${startup.hint}"`);
+      console.log('\nChoosing a mic');
+      const mic = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), [a, b] = devices, out = {};
+        const startBands = snapshotEq();
+        const realList = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
+        out.names = [a.name, b.name]; out.options = $('micSelect').options.length;
+        $('micSelect').value = b.id; $('micSelect').dispatchEvent(new Event('change', { bubbles: true })); await wait(500);
+        out.picked = state.deviceId === b.id && prefDeviceName === b.name;
+        out.firstTimeInherits = eq.b.bass.g === startBands.bands.bass.g;   // this mic has no EQ of its own yet
+        eq.b.bass.g = 5; eqEdited();
+        selectDevice(a.id); await wait(300);
+        eq.b.bass.g = -4; eqEdited();
+        selectDevice(b.id); await wait(300); out.bBass = eq.b.bass.g;
+        selectDevice(a.id); await wait(300); out.aBass = eq.b.bass.g;
+        selectDevice(b.id); await wait(500);
+        const capturedBefore = stream;
+        await loadDevices(); await wait(500);
+        out.rescanKeepsCapture = stream === capturedBefore;
+        navigator.mediaDevices.enumerateDevices = async () => (await realList()).filter(d => d.deviceId !== b.id);
+        await loadDevices(); await wait(800);
+        out.unplugged = { current: currentDevice().name, notice: $('micNotice').textContent, bass: eq.b.bass.g, stillPreferred: prefDeviceName };
+        delete navigator.mediaDevices.enumerateDevices;
+        await loadDevices(); await wait(800);
+        out.replugged = { current: currentDevice().name, notice: $('micNotice').textContent, bass: eq.b.bass.g, capturing: capturedId === state.deviceId };
+        const saved = JSON.parse((savePrefs(), localStorage.getItem(PREFS_KEY)));
+        out.savedPerMic = [saved.eqByMic[a.name] && saved.eqByMic[a.name].bands.bass.g, saved.eqByMic[b.name] && saved.eqByMic[b.name].bands.bass.g];
+        selectDevice(a.id); await wait(300);
+        restoreEq(startBands); showEqPreset(); syncEqUi(); savePrefs();
+        return out;
+      });
+      check('the picker lists mics and switches', mic.options === mic.names.length && mic.picked, `${mic.options} mics listed, picked: ${mic.picked}`);
+      check('each mic keeps its own EQ', mic.firstTimeInherits && mic.bBass === 5 && mic.aBass === -4 && mic.savedPerMic[0] === -4 && mic.savedPerMic[1] === 5, `bass ${mic.bBass} on one, ${mic.aBass} on the other; saved ${mic.savedPerMic.join(' / ')}`);
+      check('a rescan does not restart a healthy capture', mic.rescanKeepsCapture, `capture kept: ${mic.rescanKeepsCapture}`);
+      check('unplugged: falls back and says so', mic.unplugged.current === mic.names[0] && mic.unplugged.notice.includes(mic.names[1]) && mic.unplugged.bass === -4 && mic.unplugged.stillPreferred === mic.names[1], `using ${mic.unplugged.current}, "${mic.unplugged.notice}"`);
+      check('plugged back in: returns to the preferred mic', mic.replugged.current === mic.names[1] && !mic.replugged.notice && mic.replugged.bass === 5 && mic.replugged.capturing, `using ${mic.replugged.current}, EQ bass ${mic.replugged.bass}`);
       console.log('\nOne engine at a time');
       // The fake mic has no virtual cable, so this builds a send chain on the default (muted) output instead.
       const chainUse = await copy.call(async () => {
