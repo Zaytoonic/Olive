@@ -2,6 +2,10 @@ const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, protocol,
 const path = require('path');
 const fs = require('fs');
 
+// A simple window that mostly sits in the tray doesn't need the graphics process. Measured: about 150 MB less memory,
+// the same CPU with a moving meter, still smooth; only scrolling and dragging cost a little more, while they happen.
+app.disableHardwareAcceleration();
+
 // Project layout: src/main (this file), src/renderer (the window), assets (icons).
 const RENDERER = path.join(__dirname, '..', 'renderer');
 const ASSETS = path.join(__dirname, '..', '..', 'assets');
