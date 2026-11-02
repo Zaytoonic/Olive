@@ -50,6 +50,7 @@ class HelperClient {
     this.deathReason = reason;
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error(reason)); }
     this.pending.clear();
+    if (this.onDeath) this.onDeath(reason);
   }
 
   call(cmd, ...args) {
@@ -65,6 +66,7 @@ class HelperClient {
   }
 
   stop() {
+    this.onDeath = null;                         // stopping on purpose: nothing should restart it
     if (this.proc && !this.dead) { try { this.proc.stdin.end(); this.proc.kill(); } catch {} }
     this._die('helper stopped');
   }

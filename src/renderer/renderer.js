@@ -953,7 +953,18 @@ async function loadDevices() {
   if (!live) stopCapture();
   else if (!captureIsCurrent()) startCapture();
   syncSystem();
-  if (sendWanted) setSend(true);   // (re)connect the cable at start-up, after a rescan or a device change
+  if (sendWanted) await setSend(true);   // (re)connect the cable at start-up, after a rescan or a device change
+  retryWhileAudioStartsUp();
+}
+// Right after login, Windows audio can still be starting: no mics or no cable yet, and no event when they appear.
+// Keep looking for a minute, and stop as soon as everything is there.
+let startupRetries = 0, startupRetryTimer = null;
+function retryWhileAudioStartsUp() {
+  clearTimeout(startupRetryTimer);
+  if (live && (!sendWanted || sendNodes)) { startupRetries = 0; return; }
+  if (startupRetries >= 12) return;
+  startupRetries++;
+  startupRetryTimer = setTimeout(loadDevices, 5000);
 }
 
 // ---- Send to other apps (VB-Audio Virtual Cable) ----
