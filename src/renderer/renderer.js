@@ -676,7 +676,7 @@ function detachGate(ch) {                         // worklet crashed: fall back 
   routeChain(ch);
   ch.gateIsOpen = !ch.gateIsOpen; gateChain(ch, 0, performance.now());
 }
-// ---- Voice cleanup (trial) ----
+// ---- Voice cleanup ----
 // voice-worklet.js: RNNoise plus a gate that opens on detected voice. If it can't run, nr-worklet.js and the volume gate remain.
 const VOICE_WORKLET_URL = window.VOICE_WORKLET_URL || (location.protocol === 'file:' ? 'app://local/voice-worklet.js' : 'voice-worklet.js');
 async function attachVoice(ch) {
@@ -700,8 +700,8 @@ async function attachVoice(ch) {
   }
 }
 
-// ---- Noise reduction ----
-// nr-worklet.js on the raw mic. Strength never rebuilds anything, so moving the slider doesn't interrupt the audio.
+// ---- Fallback noise reduction ----
+// nr-worklet.js on the raw mic, if the voice engine can't run. Strength never rebuilds anything, so moving the slider doesn't interrupt the audio.
 async function attachNr(ch) {
   try {
     if (!ch.ctx.audioWorklet) throw new Error('AudioWorklet not supported');
