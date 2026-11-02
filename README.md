@@ -16,7 +16,7 @@ src/renderer/    the window
   gate-worklet.js  noise gate that runs on the audio thread
   nr-worklet.js    noise reduction with adjustable strength, also on the audio thread
 assets/          icon.png, icon.ico, tray-icon.png
-tools/           build.js, patch-exe.js
+tools/           build.js, patch-exe.js, audio-test/ (npm run test:audio)
 dist/MicManager/ the built app (MicManager.exe + Electron runtime)
 ```
 
@@ -24,5 +24,6 @@ dist/MicManager/ the built app (MicManager.exe + Electron runtime)
 1. `npm install` (once)
 2. `npm run build` copies `src` and `assets` into `dist/MicManager/resources/app`
 3. `npm run patch-exe` (only if the icon or version changed; close the app first)
+4. `npm run test:audio` after audio changes: measures the chain on a fake mic in a hidden, muted copy (about 2 minutes; your running app and settings aren't touched)
 
 Or run from source with `npm start`.

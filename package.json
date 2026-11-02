@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "build": "node tools/build.js",
-    "patch-exe": "node tools/patch-exe.js"
+    "patch-exe": "node tools/patch-exe.js",
+    "test:audio": "node tools/audio-test/run.js"
   },
   "devDependencies": {
     "electron": "^33.0.0",
