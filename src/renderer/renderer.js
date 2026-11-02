@@ -180,7 +180,7 @@ function updateHints() {
   $('nrHint').textContent = !state.nr ? 'Off'
     : !live ? `On · ${state.nrAmount}% (simulated)`
     : chains().some(ch => ch.nrFailed) ? 'Unavailable: the noise reduction engine could not start'
-    : `On · ${state.nrAmount}% · lowers steady noise (fans, hum, hiss) by up to ${Math.round(state.nrAmount * NR_DB_PER_PERCENT)} dB`;
+    : `On · ${state.nrAmount}% · lowers fans, rumble and hiss. If your voice sounds thin or robotic, turn it down`;
   $('monHint').textContent = !state.monitor ? "Off: you won't hear yourself"
     : analyser ? `On · ${state.monitorVol}% · use headphones to avoid echo`
     : live ? 'On · microphone not open, nothing to play'
@@ -663,7 +663,6 @@ function detachGate(ch) {                         // worklet crashed: fall back 
 }
 // ---- Noise reduction ----
 // nr-worklet.js on the raw mic. Strength never rebuilds anything, so moving the slider doesn't interrupt the audio.
-const NR_DB_PER_PERCENT = 0.3;                    // same value as in nr-worklet.js
 async function attachNr(ch) {
   try {
     if (!ch.ctx.audioWorklet) throw new Error('AudioWorklet not supported');

@@ -51,6 +51,22 @@ function makePhrases(n, levelFor, startSecs) {
 }
 const makeVoice = (n, db, startSecs) => makePhrases(n, () => db, startSecs);
 
+// Like a fan blowing on a laptop mic (measured Nov 2026): most energy below 150 Hz, with level swings of about 20 dB,
+// over a quieter steady hiss. Steady noise alone hid how little noise reduction did about this.
+function makeGustyFan(n) {
+  let seed = 4242, lp1 = 0, lp2 = 0, slow = 0;
+  const hiss = makeNoise(n), x = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const w = seed / 4294967296 * 2 - 1;
+    lp1 += 0.012 * (w - lp1); lp2 += 0.012 * (lp1 - lp2);
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    slow += 0.00012 * ((seed / 4294967296 * 2 - 1) * 30 - slow);
+    x[i] = lp2 * 0.35 * Math.pow(10, Math.max(-1, Math.min(1, slow)) * 10 / 20) + hiss[i] * 0.3;
+  }
+  return x;
+}
+
 function makeFixture() {
   const n = SR * SECONDS, noise = makeNoise(n);
   const voice = makePhrases(n, k => VOICE_LEVELS[k % VOICE_LEVELS.length], NOISE_SECS);
@@ -83,4 +99,4 @@ function writeWav(file, samples) {
   fs.writeFileSync(file, buf);
 }
 
-module.exports = { SR, NOISE_DB, makeFixture, makeNoise, makeVoice, writeWav };
+module.exports = { SR, NOISE_DB, makeFixture, makeNoise, makeVoice, makeGustyFan, writeWav };
