@@ -571,7 +571,16 @@ async function liveChecks(profile, wav, fixture) {
     if (!wanted('eq')) return;
     console.log('\nEQ graph');
     await copy.call(() => { if (!devicesCollapsed) $('devToggle').click(); });
-    await sleep(12000);                  // Chromium writes saved settings to disk a few seconds later
+    // Chromium writes saved settings to disk in its own time, later after a burst of saves. Wait until they're really there.
+    const savedOnDisk = () => {
+      const dirPath = path.join(profile, 'Local Storage', 'leveldb');
+      try {
+        const raw = fs.readdirSync(dirPath).filter(f => f.endsWith('.log')).map(f => fs.readFileSync(path.join(dirPath, f)).toString('latin1')).join('');
+        const at = raw.lastIndexOf('micManager.settings.v1');
+        return at >= 0 && raw.slice(at, at + 400).includes('"devicesCollapsed":true');
+      } catch { return false; }
+    };
+    for (let i = 0; i < 180 && !savedOnDisk(); i++) await sleep(500);
     copy.stop(); await sleep(2000);
     copy = new Copy(profile, wav, ['--hidden']);
     await copy.connect();
