@@ -136,9 +136,15 @@ function applyCompTo(ch) {
   c.threshold.value = p.threshold; c.ratio.value = p.ratio; c.knee.value = p.knee;
   c.attack.value = p.attack; c.release.value = p.release;
   if (ch.compOn === state.comp) return;
-  try { ch.volGain.disconnect(); } catch {}
-  ch.volGain.connect(state.comp ? c : (ch.gate || ch.gateGain));
+  routeChain(ch);
   ch.compOn = state.comp;
+}
+// volume -> gate -> [compressor] -> gateGain. The gate goes first: the compressor lifts noise by about 14 dB,
+// which left the gate open on noise alone (62% of the time, measured). Without the worklet, gateGain is the gate.
+function routeChain(ch) {
+  const path = [ch.volGain, ch.gate, state.comp && ch.comp, ch.gateGain].filter(Boolean);
+  for (const node of [ch.volGain, ch.gate, ch.comp]) if (node) { try { node.disconnect(); } catch {} }
+  path.reduce((a, b) => (a.connect(b), b));
 }
 function applyComp() {
   chains().forEach(applyCompTo);
@@ -322,7 +328,7 @@ function buildChain(ctx) {
   outGain.channelCount = 2; outGain.channelCountMode = 'explicit';  // always stereo out: mono plays in both ears
   outGain.channelInterpretation = 'speakers';
   const comp = ctx.createDynamicsCompressor();
-  output.connect(volGain); comp.connect(gateGain); gateGain.connect(outGain); outGain.connect(ctx.destination);
+  output.connect(volGain); gateGain.connect(outGain); outGain.connect(ctx.destination);
   // Each chain measures its own audio for the noise gate: the send engine hears the mic a little later
   // than the main one, so a gate driven by the other engine's audio would clip the starts/ends of words.
   const meter = ctx.createAnalyser();
@@ -330,7 +336,7 @@ function buildChain(ctx) {
   output.connect(meter);
   const ch = { ctx, head, hp, bands, input: hp, output, volGain, comp, compOn: null, gateGain, outGain,
                meter, meterBuf: new Float32Array(meter.fftSize), gateIsOpen: false, holdUntil: 0 };
-  applyCompTo(ch);                              // connects volume -> (compressor ->) gate
+  applyCompTo(ch);                              // connects volume -> (compressor ->) gateGain
   applyMonoTo(ch);
   applyEqTo(ch);
   attachGate(ch);                               // swaps in the audio-thread gate once it has loaded
@@ -639,10 +645,7 @@ async function attachGate(ch) {
     };
     node.onprocessorerror = () => detachGate(ch);
     ch.gate = node;
-    try { ch.comp.disconnect(); } catch {}
-    ch.comp.connect(node);
-    node.connect(ch.gateGain);
-    ch.compOn = null; applyCompTo(ch);          // route volume -> (compressor ->) worklet gate
+    routeChain(ch);                             // volume -> worklet gate -> (compressor ->) gateGain
     rampTo(ch.gateGain.gain, 1, 0.003, ch.ctx);  // gateGain is no longer the gate
     gateMode = 'audio-thread';
   } catch (err) {
@@ -653,9 +656,8 @@ async function attachGate(ch) {
 function detachGate(ch) {                         // worklet crashed: fall back to the main-thread gate
   const node = ch.gate; if (!node) return;
   ch.gate = null;
-  try { node.disconnect(); ch.comp.disconnect(); } catch {}
-  ch.comp.connect(ch.gateGain);
-  ch.compOn = null; applyCompTo(ch);
+  try { node.disconnect(); } catch {}
+  routeChain(ch);
   ch.gateIsOpen = !ch.gateIsOpen; gateChain(ch, 0, performance.now());
 }
 // ---- Noise reduction ----
@@ -697,18 +699,18 @@ function updateGateThreshold() {
   }
 }
 
-// Fallback automatic threshold (same rule as the worklet): noise floor = lowest level of the last 3 s
-// (one minimum per 100 ms), threshold = floor + 9 dB, kept between -70 and -25 dBFS.
-const floorMins = new Array(30).fill(-60);
-let floorSlotMin = Infinity, floorSlotT = 0, floorIdx = 0;
+// Fallback automatic threshold (same rule as the worklet): noise floor = the lowest 100 ms peak of the last 6 s,
+// threshold = floor + 9 dB, kept between -70 and -25 dBFS.
+const floorMins = new Array(60).fill(-60);
+let floorSlotPeak = -Infinity, floorSlotT = 0, floorIdx = 0;
 function trackFloor(amp, dt) {
   const d = ampToDb(amp);
   const lvl = isFinite(d) ? d : -120;
-  if (lvl < floorSlotMin) floorSlotMin = lvl;
+  if (lvl > floorSlotPeak) floorSlotPeak = lvl;
   floorSlotT += dt;
   if (floorSlotT >= 0.1) {
-    floorMins[floorIdx] = floorSlotMin; floorIdx = (floorIdx + 1) % floorMins.length;
-    floorSlotMin = Infinity; floorSlotT = 0;
+    floorMins[floorIdx] = floorSlotPeak; floorIdx = (floorIdx + 1) % floorMins.length;
+    floorSlotPeak = -Infinity; floorSlotT = 0;
     const floor = Math.min(-35, Math.max(-90, Math.min(...floorMins)));
     autoGateDb = Math.min(-25, Math.max(-70, floor + 9));
   }

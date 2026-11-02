@@ -3,9 +3,10 @@
 // - Look-ahead: the audio is delayed 5 ms, so the gate is already open when a word starts.
 // - Hold: stays open 150 ms after the level drops, so word endings and short pauses aren't cut.
 // - Fades: opens in ~2 ms, closes over ~80 ms (no clicks).
-// - Automatic threshold (auto = 1): the noise floor is the lowest level of the last 3 seconds (speech always
-//   has short gaps, so this lands on the background), and the threshold sits 9 dB above it,
-//   kept between -70 and -25 dBFS. Adapts to a new room within ~3 s and doesn't creep up while you talk.
+// - Automatic threshold (auto = 1): the noise floor is the peak level of the quietest 100 ms of the last 6 seconds
+//   (speech always has short gaps, so this lands on the background), and the threshold sits 9 dB above it,
+//   kept between -70 and -25 dBFS. Adapts to a new room within ~6 s. Measured on a real voice: a 3 s window let
+//   the threshold climb during continuous talking, and a larger margin cut quiet words.
 // Threshold (dBFS, used when auto = 0) and auto are AudioParams; open/closed changes and the automatic
 // threshold are posted to the page for the meter.
 
@@ -34,9 +35,9 @@ class NoiseGate extends AudioWorkletProcessor {
     this.open = false;
     this.floor = -60;                                  // learned noise floor (dBFS, peak envelope)
     this.autoThr = -51;
-    this.slot = Math.round(sr * 0.1);                  // 100 ms slots, 30 of them = 3 s window
-    this.mins = new Float32Array(30).fill(-60);
-    this.slotMin = 0; this.slotFill = 0; this.slotIdx = 0;
+    this.slot = Math.round(sr * 0.1);                  // 100 ms slots, 60 of them = 6 s window
+    this.mins = new Float32Array(60).fill(-60);
+    this.slotPeak = 0; this.slotFill = 0; this.slotIdx = 0;
     this.sinceReport = 0;
     this.port.postMessage({ open: false, threshold: this.autoThr });
   }
@@ -69,12 +70,12 @@ class NoiseGate extends AudioWorkletProcessor {
       pos = pos + 1 === this.look ? 0 : pos + 1;
     }
     this.env = env; this.gain = gain; this.hold = hold; this.pos = pos;
-    // noise floor: lowest block level in the last 3 s (one minimum per 100 ms slot)
+    // noise floor: the lowest of the last 60 slots' peaks (100 ms each, so 6 s)
     const blockDb = 20 * Math.log10(blockMax + 1e-9);
-    if (this.slotFill === 0 || blockDb < this.slotMin) this.slotMin = blockDb;
+    if (this.slotFill === 0 || blockDb > this.slotPeak) this.slotPeak = blockDb;
     this.slotFill += n;
     if (this.slotFill >= this.slot) {
-      this.mins[this.slotIdx] = this.slotMin;
+      this.mins[this.slotIdx] = this.slotPeak;
       this.slotIdx = (this.slotIdx + 1) % this.mins.length;
       this.slotFill = 0;
       let lo = Infinity; for (let i = 0; i < this.mins.length; i++) if (this.mins[i] < lo) lo = this.mins[i];
