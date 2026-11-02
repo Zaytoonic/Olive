@@ -5,6 +5,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' app://local 'wasm-unsafe-eval'; style-src 'self'">
   <title>Mic Manager</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="theme-glass.css">
 </head>
 <body>
   <header class="toolbar">
@@ -142,6 +143,16 @@
             <button type="button" id="muteKeyChange" class="pill small" title="Choose a different shortcut">Change</button>
             <label class="switch" title="Toggle mute with this shortcut, even when this window is hidden"><input type="checkbox" id="muteKeyToggle" checked><span></span></label>
           </div>
+        </div>
+        <div class="row toggle-row">
+          <div>
+            <label for="themeSelect" class="row-title">Appearance</label>
+            <div class="hint">Changes how the app looks, nothing else</div>
+          </div>
+          <select id="themeSelect" title="Choose how the app looks">
+            <option value="glass">Glass</option>
+            <option value="classic">Classic</option>
+          </select>
         </div>
         <div class="row toggle-row" id="startupRow">
           <div>

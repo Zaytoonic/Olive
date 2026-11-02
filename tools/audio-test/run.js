@@ -2,7 +2,7 @@
 //
 // Runs a separate hidden, muted copy of the app with its own temporary settings folder and a fake microphone
 // that plays a generated file. Your running app, your settings, your mic and the virtual cable are not touched.
-// During the EQ check its window opens briefly; a tray icon shows while it runs. Takes about 2 minutes.
+// During the EQ check its window opens briefly; a tray icon shows while it runs. Takes about 3 minutes.
 // Exit code 1 if any check fails. To run one part: npm run test:audio -- nr | gate | mute | eq | app
 const fs = require('fs');
 const os = require('os');
@@ -401,6 +401,36 @@ async function liveChecks(profile, wav, fixture) {
       check('a rescan does not restart a healthy capture', mic.rescanKeepsCapture, `capture kept: ${mic.rescanKeepsCapture}`);
       check('unplugged: falls back and says so', mic.unplugged.current === mic.names[0] && mic.unplugged.notice.includes(mic.names[1]) && mic.unplugged.bass === -4 && mic.unplugged.stillPreferred === mic.names[1], `using ${mic.unplugged.current}, "${mic.unplugged.notice}"`);
       check('plugged back in: returns to the preferred mic', mic.replugged.current === mic.names[1] && !mic.replugged.notice && mic.replugged.bass === 5 && mic.replugged.capturing, `using ${mic.replugged.current}, EQ bass ${mic.replugged.bass}`);
+      console.log('\nAppearance');
+      const look = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), out = {};
+        const css = () => ({ attr: document.documentElement.dataset.theme || null, bg: getComputedStyle(document.body).backgroundColor, text: getComputedStyle(document.body).color });
+        const before = { bass: eq.b.bass.g, nr: state.nrAmount, gate: state.gateAuto, comp: state.comp };
+        out.first = css(); out.firstTheme = state.theme;
+        $('themeSelect').value = 'classic'; $('themeSelect').dispatchEvent(new Event('change', { bubbles: true })); await wait(200);
+        out.classic = css(); out.savedClassic = JSON.parse(localStorage.getItem(PREFS_KEY)).theme;
+        $('themeSelect').value = 'glass'; $('themeSelect').dispatchEvent(new Event('change', { bubbles: true })); await wait(200);
+        out.glass = css(); out.savedGlass = JSON.parse(localStorage.getItem(PREFS_KEY)).theme;
+        out.sameSettings = before.bass === eq.b.bass.g && before.nr === state.nrAmount && before.gate === state.gateAuto && before.comp === state.comp;
+        return out;
+      });
+      check('Glass is the default; Classic switches instantly and is remembered', look.firstTheme === 'glass' && look.first.attr === 'glass' && look.classic.attr === null && look.classic.text === 'rgb(245, 245, 247)' && look.savedClassic === 'classic' && look.glass.attr === 'glass' && look.savedGlass === 'glass', `classic text ${look.classic.text}, glass text ${look.glass.text}, saved ${look.savedClassic} then ${look.savedGlass}`);
+      check('switching looks changes no settings', look.sameSettings, `settings unchanged: ${look.sameSettings}`);
+      // Text in the Glass look against the darkest background it can sit on (each translucent surface over the deepest pastel).
+      const contrast = await copy.call(() => {
+        const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+        const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+        const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+        const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+        const rgb = el => getComputedStyle(el).color.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number);
+        const deepest = hex('#e6ddfc'), onSurface = deepest.map(v => v + (255 - v) * 0.5);   // weakest part of the surfaces' gloss
+        const rows = [['text', document.querySelector('.row-title'), onSurface], ['hints', document.querySelector('.hint'), onSurface], ['values', $('volumeVal'), onSurface], ['section titles', document.querySelector('.group-title'), deepest], ['footer', $('appFooter'), deepest], ['captions', document.querySelector('.caption'), onSurface], ['muted banner', $('mutedBanner'), hex('#f2c9d8')]];
+        const out = rows.map(([name, el, bg]) => ({ name, r: ratio(rgb(el), bg) }));
+        for (const [name, top] of [['Muted button', '#cf3a73'], ['Listening button', '#6f60e6']]) out.push({ name, r: ratio([255, 255, 255], hex(top)) });
+        out.push({ name: 'warnings', r: ratio(hex('#8a5600'), onSurface) });
+        return out;
+      });
+      check('Glass text is readable (at least 4.5:1)', contrast.every(c => c.r >= 4.5), contrast.map(c => `${c.name} ${c.r.toFixed(1)}`).join(', '));
       console.log('\nStart-up and recovery');
       const retry = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
