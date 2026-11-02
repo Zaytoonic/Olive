@@ -347,6 +347,28 @@ async function liveChecks(profile, wav, fixture) {
       console.log('\nStart with Windows');
       const startup = await copy.call(async () => ({ api: await window.appStartup.get(), disabled: $('startupToggle').disabled, hint: $('startupHint').textContent }));
       check('a copy run from source cannot register itself at login', startup.api.supported === false && startup.disabled, `toggle disabled: ${startup.disabled}, hint: "${startup.hint}"`);
+      console.log('\nOne engine at a time');
+      // The fake mic has no virtual cable, so this builds a send chain on the default (muted) output instead.
+      const chainUse = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), level = async () => { let p = 0; for (let i = 0; i < 100; i++) { p = Math.max(p, chainAmplitude(meterChain())); await wait(30); } return 20 * Math.log10(p + 1e-9); };
+        const saved = state.nrAmount; state.nr = false; applyNr();
+        state.gateAuto = false; state.gateDb = -60;      // gate wide open: the file's noise-only part must still reach the meter
+        updateGate();
+        const ctx = new AudioContext({ sampleRate: 48000 }); sendCtx = ctx; sendNodes = buildChain(ctx); connectSendSource(); syncChains();
+        await wait(2500);                                // lets its worklets load
+        const sending = { main: audioCtx.state, send: ctx.state, meterIsSend: meterChain() === sendNodes, level: await level() };
+        setMonitor(true); await wait(1000);
+        const listening = { main: audioCtx.state, meterIsMain: meterChain() === eqNodes, level: await level() };
+        setMonitor(false); await wait(800);
+        const back = audioCtx.state;
+        teardownSend(); await wait(800);
+        const after = { main: audioCtx.state, meterIsMain: meterChain() === eqNodes, level: await level() };
+        state.nr = true; state.nrAmount = saved; state.gateAuto = true; applyNr(); updateGate();
+        return { sending, listening, back, after };
+      });
+      check('while sending, the second engine sleeps and the meter still reads', chainUse.sending.main === 'suspended' && chainUse.sending.send === 'running' && chainUse.sending.meterIsSend && chainUse.sending.level > -70, `second engine ${chainUse.sending.main}, sending engine ${chainUse.sending.send}, meter ${f1(chainUse.sending.level)} dB`);
+      check('Listen wakes it, and it sleeps again', chainUse.listening.main === 'running' && chainUse.listening.meterIsMain && chainUse.listening.level > -70 && chainUse.back === 'suspended', `with Listen ${chainUse.listening.main}, meter ${f1(chainUse.listening.level)} dB; afterwards ${chainUse.back}`);
+      check('it runs again when sending stops', chainUse.after.main === 'running' && chainUse.after.meterIsMain && chainUse.after.level > -70, `${chainUse.after.main}, meter ${f1(chainUse.after.level)} dB`);
     }
 
     if (wanted('nr')) console.log('\nNoise reduction slider');

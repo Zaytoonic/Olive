@@ -102,7 +102,7 @@ function setMonitor(on) {
   b.classList.toggle('on', on);
   b.textContent = on ? 'Listening' : 'Listen';
   b.setAttribute('aria-pressed', on);
-  if (on && audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  syncChains();
   updateMonitorGain();
   updateHints();
 }
@@ -114,6 +114,27 @@ function rampTo(param, value, tc = 0.02, ctx = audioCtx) {
 }
 // All live processing chains: the main one (meter + Listen) and, when sending, the one feeding the cable.
 const chains = () => [eqNodes, sendNodes].filter(Boolean);
+// One running engine is enough unless you're listening: while sending, the send chain also drives the meter,
+// and the main chain sleeps (its engine used half the app's CPU just to feed a meter).
+const mainNeeded = () => state.monitor || !sendNodes;
+const meterChain = () => (mainNeeded() ? eqNodes : sendNodes);
+let srcLinked = false;
+function syncChains() {
+  if (!audioCtx || !eqNodes) return;
+  const need = mainNeeded();
+  if (need && audioCtx.state === 'suspended') audioCtx.resume();
+  if (srcNode && need && !srcLinked) { srcNode.connect(eqNodes.head); srcLinked = true; }
+  if (srcNode && !need && srcLinked) { try { srcNode.disconnect(eqNodes.head); } catch {} srcLinked = false; }
+  if (!need && audioCtx.state === 'running') audioCtx.suspend();
+  syncTicker();
+}
+// The 50x-per-second timer only matters while drawing, or when a chain needs the main-thread gate.
+let tickTimer = null;
+function syncTicker() {
+  const needed = !isHidden() || !analyser || chains().some(ch => !ch.gate);
+  if (needed && !tickTimer) { last = performance.now(); tickTimer = setInterval(tick, 20); }
+  if (!needed && tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+}
 // Mono: the first EQ node downmixes to 1 channel ((L+R)/2), which then plays in both ears.
 function applyMono() {
   $('monoHint').textContent = state.mono ? 'On: left and right mixed, heard in both ears' : 'Off: stereo mics keep left and right separate';
@@ -159,7 +180,8 @@ function applyComp() {
 }
 function updateCompHint() {
   if (!state.comp) { $('compHint').textContent = 'Off: your volume goes out as-is'; return; }
-  const r = eqNodes && typeof eqNodes.comp.reduction === 'number' ? eqNodes.comp.reduction : 0;
+  const mc = eqNodes && meterChain();
+  const r = mc && typeof mc.comp.reduction === 'number' ? mc.comp.reduction : 0;
   $('compHint').textContent = `On · strength ${state.compAmount}%` + (r < -0.5 ? ` · evening out ${(-r).toFixed(1)} dB` : '');
 }
 function updateVolumeGain() { chains().forEach(ch => rampTo(ch.volGain.gain, volFactor(), 0.02, ch.ctx)); }
@@ -232,11 +254,11 @@ function tick() {
   // Mock mode (no live mic) shows the simulated gate on the meter.
   let open;
   if (!analyser) { trackFloor(raw * volFactor(), dt); open = db >= gateDbNow(); }   // mock: simulated gate
-  else if (eqNodes.gate) open = eqNodes.gateIsOpen;
-  else open = gateChain(eqNodes, raw, now);
+  else if (meterChain().gate) open = meterChain().gateIsOpen;
+  else open = gateChain(meterChain(), raw, now);
   gateOpen = open;
   // send chain: same, from the audio that is actually going to Discord
-  if (sendNodes && !sendNodes.gate) gateChain(sendNodes, sendSrc ? chainAmplitude(sendNodes) : 0, now);
+  if (sendNodes && !sendNodes.gate && meterChain() !== sendNodes) gateChain(sendNodes, sendSrc ? chainAmplitude(sendNodes) : 0, now);
   if (!open) db = -Infinity;                                 // noise gate closes
   if (state.muted) db = -Infinity;
   if (isHidden()) { smoothed = MIN_DB; peak = MIN_DB; return; }       // hidden in the tray: audio work only, no drawing
@@ -271,7 +293,7 @@ let shownCover = '', shownPeak = '', shownDb = '', dbShownAt = 0, drawing = fals
 // Hidden = minimized / in the tray. Electron tells us via preload (document.hidden can't, see main.js).
 const isHidden = () => windowHidden || document.hidden;
 function startDrawing() { if (!drawing && !isHidden()) { drawing = true; requestAnimationFrame(draw); } }
-if (window.appWindow) window.appWindow.onVisibility(v => { windowHidden = !v; if (v) { startDrawing(); scheduleEqDraw(); } });
+if (window.appWindow) window.appWindow.onVisibility(v => { windowHidden = !v; if (v) { startDrawing(); scheduleEqDraw(); } syncTicker(); });
 document.addEventListener('visibilitychange', startDrawing);
 function draw(now) {
   if (isHidden()) { drawing = false; return; }        // stop the frame loop entirely until shown again
@@ -628,7 +650,7 @@ function bindEq() {
 // ---- Live input (Web Audio) ----
 
 
-function liveAmplitude() { return chainAmplitude(eqNodes); }
+function liveAmplitude() { return chainAmplitude(meterChain()); }
 function chainAmplitude(ch) {
   const b = ch.meterBuf;
   ch.meter.getFloatTimeDomainData(b);
@@ -657,13 +679,14 @@ async function attachGate(ch) {
       const d = e.data || {};
       if (ch.voice && state.gateAuto) return;       // the voice engine reports open/closed instead
       ch.gateIsOpen = !!d.open;
-      if (ch === eqNodes && typeof d.threshold === 'number') autoGateDb = d.threshold;   // learned on the main chain
+      if (ch === meterChain() && typeof d.threshold === 'number') autoGateDb = d.threshold;   // learned on the running chain
     };
     node.onprocessorerror = () => detachGate(ch);
     ch.gate = node;
     routeChain(ch);                             // volume -> worklet gate -> (compressor ->) gateGain
     rampTo(ch.gateGain.gain, 1, 0.003, ch.ctx);  // gateGain is no longer the gate
     gateMode = 'audio-thread';
+    syncTicker();
   } catch (err) {
     if (gateMode !== 'audio-thread') gateMode = 'main-thread';
     console.warn('Audio-thread noise gate unavailable, using the fallback:', err && err.message);
@@ -672,6 +695,7 @@ async function attachGate(ch) {
 function detachGate(ch) {                         // worklet crashed: fall back to the main-thread gate
   const node = ch.gate; if (!node) return;
   ch.gate = null;
+  syncTicker();
   try { node.disconnect(); } catch {}
   routeChain(ch);
   ch.gateIsOpen = !ch.gateIsOpen; gateChain(ch, 0, performance.now());
@@ -759,7 +783,7 @@ function trackFloor(amp, dt) {
 // go quiet (hold) so word endings aren't cut, then fades out.
 const GATE_HOLD_MS = 150;
 function gateChain(ch, amp, now) {
-  if (ch === eqNodes) trackFloor(amp * volFactor(), 0.02);
+  if (ch === meterChain()) trackFloor(amp * volFactor(), 0.02);
   const loud = ampToDb(amp * volFactor()) >= gateDbNow();
   if (loud) ch.holdUntil = now + GATE_HOLD_MS;
   const open = loud || now < ch.holdUntil;
@@ -774,7 +798,7 @@ function stopCapture() {
   if (stream) stream.getTracks().forEach(tr => tr.stop());
   if (srcNode) { try { srcNode.disconnect(); } catch {} }
   if (sendSrc) { try { sendSrc.disconnect(); } catch {} }
-  stream = null; srcNode = null; sendSrc = null; analyser = null;
+  stream = null; srcNode = null; sendSrc = null; analyser = null; srcLinked = false;
   updateHints();
 }
 
@@ -791,11 +815,12 @@ async function startCapture() {
     if (token !== captureToken) { s.getTracks().forEach(tr => tr.stop()); return; }
     stream = s;
     if (!audioCtx || !eqNodes) throw Object.assign(new Error('No audio engine'), { name: 'AudioEngineError' });
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    if (mainNeeded() && audioCtx.state === 'suspended') await audioCtx.resume();
     srcNode = audioCtx.createMediaStreamSource(stream);
-    srcNode.connect(eqNodes.head);
+    srcLinked = false;
     analyser = eqNodes.meter;                                // marks live capture as active
     connectSendSource();
+    syncChains();
     setStatus('');
     updateHints();
   } catch (err) {
@@ -876,6 +901,7 @@ function teardownSend() {
   if (sendSrc) { try { sendSrc.disconnect(); } catch {} }
   if (sendCtx) sendCtx.close().catch(() => {});
   sendCtx = null; sendNodes = null; sendSrc = null; sendCableId = null;
+  syncChains();
 }
 async function findCable() {
   const all = await navigator.mediaDevices.enumerateDevices();
@@ -912,6 +938,7 @@ async function setSend(on) {
       sendCtx = ctx; sendCableId = cable.deviceId;
       sendNodes = buildChain(ctx);
       connectSendSource();
+      syncChains();
     }
     state.send = true;
     updateSendGain();
@@ -1197,7 +1224,7 @@ bindControls(); bindEq(); updateGate(); updateHints(); updateCompHint(); paintRa
 initStartup();
 initMuteHotkey();
 ui.cover = $('meterCover'); ui.peak = $('meterPeak'); ui.levelDb = $('levelDb');
-setInterval(tick, 20);                 // audio + noise gate, 50x per second (keeps running in the tray)
+syncTicker();                          // meter and any main-thread gate, 50x per second while needed
 startDrawing();                        // meter drawing, only while the window is visible
 applySysToUi();
 loadDevices();
