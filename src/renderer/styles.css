@@ -130,6 +130,9 @@ select.current-name option { font-size: 15px; font-weight: 400; background: var(
   background: var(--tile); color: var(--text); font-size: 15px; font-weight: 600;
 }
 .pill:hover { background: #3a3a3c; }
+.pill.small { height: 32px; min-width: 0; padding: 0 14px; font-size: 13px; }
+.pill.small:disabled { opacity: .4; cursor: default; }
+.pill.small.capturing { background: var(--accent); color: #fff; }
 .pill.listen.on { background: var(--accent); color: #fff; }
 .pill.mute.on { background: var(--red); color: #fff; }
 

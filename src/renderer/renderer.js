@@ -12,7 +12,7 @@ let live = false;            // true when devices come from the system
 const state = {
   deviceId: MOCK_DEVICES.find(d => d.isDefault).id,
   volume: 75, muted: false, gateDb: -45, gateAuto: true,
-  nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true
+  nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M'
 };
 
 const $ = id => document.getElementById(id);
@@ -1184,6 +1184,7 @@ function loadPrefs() {
   state.comp = p.comp === true;
   state.compAmount = num(p.compAmount, 0, 100, state.compAmount);
   state.muteHotkey = p.muteHotkey !== false;
+  if (typeof p.muteAccel === 'string') state.muteAccel = p.muteAccel;
   sendWanted = true;                             // Send to Discord is always on at launch;
   state.send = true;                             // loadDevices() connects the cable once devices are known
   devicesCollapsed = p.devicesCollapsed === true;
@@ -1225,7 +1226,7 @@ function savePrefs() {
   const p = {
     deviceId: prefDeviceId, deviceName: prefDeviceName, volume: state.volume, gateDb: state.gateDb, gateAuto: state.gateAuto, mono: state.mono, tunedVoice: 1,
     nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol, send: sendWanted,
-    comp: state.comp, compAmount: state.compAmount, devicesCollapsed, muteHotkey: state.muteHotkey,
+    comp: state.comp, compAmount: state.compAmount, devicesCollapsed, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel,
     eq: snapshotEq(),
     eqByMic: eqOwner ? { ...eqByMic, [eqOwner]: snapshotEq() } : eqByMic
   };
@@ -1267,12 +1268,58 @@ async function toggleMuteFromOutside() {
   if (ep) { try { storeSys(await sysApi.get(ep.id)); applySysToUi(); } catch { /* toggle from what we know */ } }
   toggleMute();
 }
+const hotkeyLabel = a => a.replace('Control', 'Ctrl').replace('Super', 'Win');
 async function applyMuteHotkey() {
-  const hint = $('muteKeyHint');
-  if (!state.muteHotkey) { await window.appMute.setHotkey(false); hint.textContent = 'Off: Ctrl+M still works while this window has focus'; return; }
-  const ok = await window.appMute.setHotkey(true);
-  hint.textContent = ok ? 'Ctrl+Alt+M mutes your mic from anywhere' : 'Ctrl+Alt+M is already in use by another app';
+  const hint = $('muteKeyHint'), label = hotkeyLabel(state.muteAccel);
+  $('muteKeyChange').disabled = !state.muteHotkey;
+  if (!state.muteHotkey) { await window.appMute.setHotkey(null); hint.textContent = 'Off: Ctrl+M still works while this window has focus'; return; }
+  const ok = await window.appMute.setHotkey(state.muteAccel);
+  hint.textContent = ok ? `${label} mutes your mic from anywhere` : `${label} is already in use by another app`;
 }
+// Changing the shortcut: the next key combination pressed in this window becomes it.
+// The old one is released while choosing, otherwise pressing it again would never reach this window.
+let hotkeyChoosing = false;
+function hotkeyFromEvent(e) {
+  const letter = /^Key([A-Z])$/.exec(e.code), digit = /^Digit(\d)$/.exec(e.code), fn = /^F(?:[1-9]|1\d|2[0-4])$/.test(e.code);
+  const key = letter ? letter[1] : digit ? digit[1] : fn ? e.code : null;
+  if (!key) return null;
+  const mods = [e.ctrlKey && 'Control', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super'].filter(Boolean);
+  if (!fn && !mods.some(m => m !== 'Shift')) return null;   // a plain letter would stop typing it anywhere
+  return [...mods, key].join('+');
+}
+function setHotkeyChoosing(on) {
+  hotkeyChoosing = on;
+  const b = $('muteKeyChange');
+  b.classList.toggle('capturing', on);
+  b.textContent = on ? 'Press keys…' : 'Change';
+}
+async function startChoosingHotkey() {
+  if (hotkeyChoosing) return;
+  setHotkeyChoosing(true);
+  await window.appMute.setHotkey(null);
+  $('muteKeyHint').textContent = 'Press the new shortcut, or Esc to cancel';
+}
+async function finishChoosingHotkey(accelerator) {
+  setHotkeyChoosing(false);
+  if (!accelerator) return applyMuteHotkey();
+  if (await window.appMute.setHotkey(accelerator)) {
+    state.muteAccel = accelerator;
+    savePrefs();
+    return applyMuteHotkey();
+  }
+  await applyMuteHotkey();
+  $('muteKeyHint').textContent = `${hotkeyLabel(accelerator)} is already in use by another app. Keeping ${hotkeyLabel(state.muteAccel)}`;
+}
+window.addEventListener('keydown', e => {
+  if (!hotkeyChoosing) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (e.code === 'Escape') { finishChoosingHotkey(null); return; }
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;   // still holding modifiers
+  const accelerator = hotkeyFromEvent(e);
+  if (accelerator) finishChoosingHotkey(accelerator);
+  else $('muteKeyHint').textContent = 'Use Ctrl, Alt or Win with a letter or number, or an F key. Esc cancels';
+}, true);
+window.addEventListener('blur', () => { if (hotkeyChoosing) finishChoosingHotkey(null); });
 function initMuteHotkey() {
   const t = $('muteKeyToggle');
   if (!window.appMute) { t.disabled = true; t.checked = false; $('muteKeyHint').textContent = 'Only in the Windows app'; return; }
@@ -1280,6 +1327,7 @@ function initMuteHotkey() {
   window.appMute.onMicKey(onMicKey);
   t.checked = state.muteHotkey;
   t.addEventListener('change', () => { state.muteHotkey = t.checked; applyMuteHotkey(); });
+  $('muteKeyChange').addEventListener('click', startChoosingHotkey);
   applyMuteHotkey();
 }
 
@@ -1339,4 +1387,5 @@ loadDevices();
 setInterval(pollSys, 2000);
 window.addEventListener('focus', pollSys);
 $('refreshBtn').addEventListener('click', loadDevices);
+if (window.appInfo) window.appInfo.version().then(v => { $('appFooter').textContent = 'Mic Manager ' + v.replace(/\.0$/, ''); }).catch(() => {});
 navigator.mediaDevices.addEventListener('devicechange', () => { clearTimeout(window._dc); window._dc = setTimeout(loadDevices, 400); });

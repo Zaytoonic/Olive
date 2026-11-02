@@ -254,11 +254,11 @@ const pageOutPeak = async secs => {
   return 20 * Math.log10(pk + 1e-9);
 };
 // Presses Ctrl+Alt+M for real, through Windows.
-function pressHotkey(holdRepeats = 0) {
+function pressHotkey(holdRepeats = 0, letterVk = 0x4D) {
   const ps = "Add-Type -Name K -Namespace T -MemberDefinition '[DllImport(\"user32.dll\")] public static extern void keybd_event(byte v, byte s, uint f, UIntPtr e);';" +
-    "foreach ($k in 0x11,0x12,0x4D) { [T.K]::keybd_event($k,0,0,[UIntPtr]::Zero) };" +
-    (holdRepeats ? `Start-Sleep -Milliseconds 500; 1..${holdRepeats} | ForEach-Object { [T.K]::keybd_event(0x4D,0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 33 };` : 'Start-Sleep -Milliseconds 40;') +
-    "foreach ($k in 0x4D,0x12,0x11) { [T.K]::keybd_event($k,0,2,[UIntPtr]::Zero) }";
+    `foreach ($k in 0x11,0x12,${letterVk}) { [T.K]::keybd_event($k,0,0,[UIntPtr]::Zero) };` +
+    (holdRepeats ? `Start-Sleep -Milliseconds 500; 1..${holdRepeats} | ForEach-Object { [T.K]::keybd_event(${letterVk},0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 33 };` : 'Start-Sleep -Milliseconds 40;') +
+    `foreach ($k in ${letterVk},0x12,0x11) { [T.K]::keybd_event($k,0,2,[UIntPtr]::Zero) }`;
   execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore' });
 }
 const pageEqStretch = async () => {
@@ -449,6 +449,29 @@ async function liveChecks(profile, wav, fixture) {
         const held = await copy.call(() => state.muted);
         check('holding the keys toggles once', held === true, `muted after holding: ${held}`);
         await copy.call(() => { if (state.muted) toggleMute(); });
+        // Choosing a new shortcut, through the real button and a real key press
+        const key = (code, more = {}) => `window.dispatchEvent(new KeyboardEvent('keydown', { code: '${code}', key: '${code}', cancelable: true, ...${JSON.stringify(more)} }))`;
+        const hint = () => copy.call(() => $('muteKeyHint').textContent);
+        await copy.call(() => { $('muteKeyChange').click(); });
+        await sleep(300);
+        await copy.call(new Function(key('Escape')));
+        await sleep(400);
+        const cancelled = await hint();
+        await copy.call(() => { $('muteKeyChange').click(); });
+        await sleep(300);
+        await copy.call(new Function(key('KeyJ')));              // no modifier: must be refused
+        const refused = await hint();
+        await copy.call(new Function(key('KeyJ', { ctrlKey: true, altKey: true })));
+        await sleep(500);
+        const changed = await hint();
+        pressHotkey(0, 0x4A); await sleep(800);
+        const muted = await copy.call(() => state.muted);
+        await sleep(700); pressHotkey(0, 0x4A); await sleep(800);
+        const backOn = await copy.call(() => state.muted);
+        const savedKey = await copy.call(() => JSON.parse((savePrefs(), localStorage.getItem(PREFS_KEY))).muteAccel);
+        check('a new shortcut can be chosen and works', /Ctrl\+Alt\+J/.test(changed) && muted === true && backOn === false && savedKey === 'Control+Alt+J', `"${changed}", muted ${muted} then ${backOn}, saved ${savedKey}`);
+        check('choosing is safe: Esc cancels, plain keys are refused', /Ctrl\+Alt\+M/.test(cancelled) && /Use Ctrl/.test(refused), `"${cancelled}" / "${refused}"`);
+        await copy.call(() => { state.muteAccel = 'Control+Alt+M'; return applyMuteHotkey(); });
       }
       await copy.call(() => setMonitor(false));
     }
