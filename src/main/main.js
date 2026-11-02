@@ -107,7 +107,7 @@ function createWindow() {
   const sendVisible = v => { if (win && !win.isDestroyed()) win.webContents.send('window:visible', v); };
   win.on('hide', () => sendVisible(false));
   win.on('minimize', () => sendVisible(false));
-  win.on('show', () => sendVisible(!win.isMinimized()));
+  win.on('show', () => { sendVisible(!win.isMinimized()); updateTaskbarBadge(); });   // Windows forgets the badge while hidden
   win.on('restore', () => sendVisible(true));
   win.webContents.on('did-finish-load', () => sendVisible(win.isVisible() && !win.isMinimized()));
   win.on('close', e => {
@@ -137,7 +137,7 @@ function requestMuteToggle() {
   if (repeat) return;
   if (win && !win.isDestroyed()) win.webContents.send('mute:toggle');
 }
-ipcMain.handle('mute:state', (event, on) => { muted = on === true; updateTray(); });
+ipcMain.handle('mute:state', (event, on) => { muted = on === true; updateTray(); updateTaskbarBadge(); });
 // Registers this shortcut in place of the current one; none turns it off. Returns false if another app holds it.
 ipcMain.handle('mute:hotkey', (event, accelerator) => {
   if (muteHotkey) globalShortcut.unregister(muteHotkey);
@@ -149,6 +149,13 @@ ipcMain.handle('mute:hotkey', (event, accelerator) => {
   return ok;
 });
 ipcMain.handle('app:version', () => app.getVersion());
+
+// A red slashed-mic badge on the taskbar button while muted, when the window is open.
+function updateTaskbarBadge() {
+  if (!win || win.isDestroyed() || process.platform !== 'win32') return;
+  if (muted) win.setOverlayIcon(nativeImage.createFromPath(path.join(ASSETS, 'taskbar-muted-badge.png')), 'Microphone muted');
+  else win.setOverlayIcon(null, '');
+}
 
 function updateTray() {
   if (!tray) return;
