@@ -440,6 +440,26 @@ async function liveChecks(profile, wav, fixture) {
       }, look);
       check(`${look === 'dark' ? 'Dark' : 'Glass'} text is readable (at least 4.5:1)`, contrast.every(c => c.r >= 4.5), contrast.map(c => `${c.name} ${c.r.toFixed(1)}`).join(', '));
       }
+      console.log('\nEQ dropdown and scrolling');
+      const eqUi = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), out = { startsClosed: $('eqBody').hidden && state.eqOpen === false && $('eqExpand').getAttribute('aria-expanded') === 'false' };
+        $('eqExpand').click(); await wait(250);
+        out.opens = !$('eqBody').hidden && $('eqExpand').getAttribute('aria-expanded') === 'true' && $('eqCurve').clientWidth > 100;
+        out.savedOpen = JSON.parse(localStorage.getItem(PREFS_KEY)).eqOpen;
+        const before = JSON.stringify(eq.b), c = $('eqCurve'), r = c.getBoundingClientRect(), pt = eqPoint('mid');
+        const wheel = ctrlKey => { const e = new WheelEvent('wheel', { deltaY: -400, clientX: r.left + pt.x, clientY: r.top + pt.y, ctrlKey, bubbles: true, cancelable: true }); c.dispatchEvent(e); return e.defaultPrevented; };
+        out.plainPrevented = wheel(false);
+        out.plainUnchanged = JSON.stringify(eq.b) === before;
+        out.ctrlPrevented = wheel(true);
+        out.ctrlChanged = JSON.stringify(eq.b) !== before;
+        $('eqExpand').click(); await wait(250);
+        out.closes = $('eqBody').hidden;
+        out.savedClosed = JSON.parse(localStorage.getItem(PREFS_KEY)).eqOpen;
+        return out;
+      });
+      check('the EQ starts closed, opens, closes, and remembers', eqUi.startsClosed && eqUi.opens && eqUi.savedOpen === true && eqUi.closes && eqUi.savedClosed === false, JSON.stringify({ startsClosed: eqUi.startsClosed, opens: eqUi.opens, closes: eqUi.closes }));
+      check('a plain scroll over the graph changes nothing and keeps scrolling the page', eqUi.plainUnchanged && !eqUi.plainPrevented, `EQ unchanged: ${eqUi.plainUnchanged}, scroll blocked: ${eqUi.plainPrevented}`);
+      check('Ctrl + scroll still changes the width', eqUi.ctrlChanged && eqUi.ctrlPrevented, `changed: ${eqUi.ctrlChanged}`);
       console.log('\nStart-up and recovery');
       const retry = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -570,14 +590,15 @@ async function liveChecks(profile, wav, fixture) {
 
     if (!wanted('eq')) return;
     console.log('\nEQ graph');
-    await copy.call(() => { if (!devicesCollapsed) $('devToggle').click(); });
+    await copy.call(() => { setEqOpen(true); if (!devicesCollapsed) $('devToggle').click(); savePrefs(); });
     // Chromium writes saved settings to disk in its own time, later after a burst of saves. Wait until they're really there.
     const savedOnDisk = () => {
       const dirPath = path.join(profile, 'Local Storage', 'leveldb');
       try {
         const raw = fs.readdirSync(dirPath).filter(f => f.endsWith('.log')).map(f => fs.readFileSync(path.join(dirPath, f)).toString('latin1')).join('');
         const at = raw.lastIndexOf('micManager.settings.v1');
-        return at >= 0 && raw.slice(at, at + 400).includes('"devicesCollapsed":true');
+        const saved = raw.slice(at, at + 900);
+        return at >= 0 && saved.includes('"devicesCollapsed":true') && saved.includes('"eqOpen":true');
       } catch { return false; }
     };
     for (let i = 0; i < 180 && !savedOnDisk(); i++) await sleep(500);

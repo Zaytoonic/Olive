@@ -33,6 +33,10 @@ The Glass style in dark mode: the same forms, glossy pebbles, pearl controls and
 ## Classic (`src/renderer/styles.css`)
 The original dark look, following Apple's interface guidelines: clarity, deference, depth. Glass and Dark only add rules scoped to `html[data-theme="glass"]`, so Classic is unchanged by them.
 
+## Behaviour shared by all looks
+- The EQ opens like a dropdown. It's closed by default and the choice is remembered, with its on/off switch and preset always in reach.
+- A plain mouse wheel over the graph scrolls the page. Ctrl + scroll changes a band's width.
+
 ## Rolling back
 - **Any time:** switch to Classic in the app. The choice is remembered.
 - **Removing Glass from the code:** the git tag `before-glass-look` marks the last commit before it.

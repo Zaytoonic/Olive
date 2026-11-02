@@ -12,7 +12,7 @@ let live = false;            // true when devices come from the system
 const state = {
   deviceId: MOCK_DEVICES.find(d => d.isDefault).id,
   volume: 75, muted: false, gateDb: -45, gateAuto: true,
-  nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M', theme: 'glass'
+  nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M', theme: 'glass', eqOpen: false
 };
 
 const THEMES = ['glass', 'dark', 'classic'];
@@ -530,7 +530,7 @@ let shownReadout = '';
 function updateEqReadout() {
   let html;
   if (!eqSel) {
-    html = 'Drag a point to shape your sound · scroll over it to change its width · double-click to reset';
+    html = 'Drag a point to shape your sound · Ctrl + scroll over it to change its width · double-click to reset';
   } else {
     const d = bandDef(eqSel), s = eq.b[eqSel];
     html = `<b>${d.name}</b><span class="num">${fmtHz(s.f)}</span><span class="num">${fmtDb(s.g)}</span>` +
@@ -690,10 +690,12 @@ function bindEqGraph() {
     const p = local(e), key = bandAt(p.x, p.y);
     if (key) { resetBand(key); selectBand(key); eqEdited(); }
   });
+  // Width needs Ctrl: a plain wheel must keep scrolling the page, or passing over the graph quietly changes your EQ.
   c.addEventListener('wheel', e => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();                                 // and Ctrl + scroll here never zooms the page
     const p = local(e), key = bandAt(p.x, p.y, 40) || eqSel;
     if (!key || bandDef(key).type !== 'peaking') return;
-    e.preventDefault();
     const s = eq.b[key];
     s.q = Math.round(clamp(s.q * Math.exp(-e.deltaY * 0.0015), EQ_Q_MIN, EQ_Q_MAX) * 100) / 100;
     if (eqSel !== key) selectBand(key);
@@ -726,7 +728,19 @@ function applyPreset(p) {
   });
   eq.lowCut = p.lowCut;
 }
+// The EQ opens like a dropdown: closed by default, and the choice is remembered. Closed, nothing in it can be changed by accident.
+function setEqOpen(open) {
+  state.eqOpen = open === true;
+  const b = $('eqExpand');
+  b.setAttribute('aria-expanded', String(state.eqOpen));
+  $('eqBody').hidden = !state.eqOpen;
+  if (state.eqOpen) {
+    scheduleEqDraw();
+    requestAnimationFrame(() => $('eqBody').scrollIntoView({ block: 'nearest' }));
+  } else selectBand(null);
+}
 function bindEq() {
+  $('eqExpand').addEventListener('click', () => { setEqOpen(!state.eqOpen); savePrefs(); });
   renderEqChips();
   bindEqGraph();
   $('eqPreset').addEventListener('change', e => {
@@ -1216,6 +1230,7 @@ function loadPrefs() {
   state.muteHotkey = p.muteHotkey !== false;
   if (typeof p.muteAccel === 'string') state.muteAccel = p.muteAccel;
   state.theme = THEMES.includes(p.theme) ? p.theme : 'glass';
+  state.eqOpen = p.eqOpen === true;
   sendWanted = true;                             // Send to Discord is always on at launch;
   state.send = true;                             // loadDevices() connects the cable once devices are known
   devicesCollapsed = p.devicesCollapsed === true;
@@ -1257,7 +1272,7 @@ function savePrefs() {
   const p = {
     deviceId: prefDeviceId, deviceName: prefDeviceName, volume: state.volume, gateDb: state.gateDb, gateAuto: state.gateAuto, mono: state.mono, tunedVoice: 1,
     nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol, send: sendWanted,
-    comp: state.comp, compAmount: state.compAmount, devicesCollapsed, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel, theme: state.theme,
+    comp: state.comp, compAmount: state.compAmount, devicesCollapsed, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel, theme: state.theme, eqOpen: state.eqOpen,
     eq: snapshotEq(),
     eqByMic: eqOwner ? { ...eqByMic, [eqOwner]: snapshotEq() } : eqByMic
   };
@@ -1433,6 +1448,7 @@ audioCtxInit();
 applyMono();
 bindControls(); bindEq(); updateGate(); updateHints(); updateCompHint(); paintRanges();
 applyTheme(state.theme);
+setEqOpen(state.eqOpen);
 $('themeSelect').addEventListener('change', e => chooseTheme(e.target.value));
 if (window.appInfo) window.appInfo.onThemeChosen(chooseTheme);
 initStartup();
