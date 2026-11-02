@@ -4,7 +4,7 @@ Microphone manager for Windows, inspired by SteelSeries Sonar's mic tab.
 
 **Run it:** `dist\MicManager\MicManager.exe` (keep it in its folder; closing hides it to the tray).
 
-The look can be switched between Glass and Classic in the app; see [DESIGN.md](DESIGN.md).
+The look can be switched between Glass, Dark and Classic in the app; see [DESIGN.md](DESIGN.md).
 
 ## Folders
 ```

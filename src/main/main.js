@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, protocol, globalShortcut, screen } = require('electron');
+const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, nativeTheme, protocol, globalShortcut, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -161,12 +161,18 @@ ipcMain.handle('mute:hotkey', (event, accelerator) => {
   return ok;
 });
 ipcMain.handle('app:version', () => app.getVersion());
-// The page owns the look. This keeps the window's backing colour and the tray menu in step with it.
+// The page owns the look. This keeps the window's backing colour, title bar and the tray menu in step with it.
 let theme = 'glass';
-const THEME_BACKGROUND = { glass: '#eeebfc', classic: '#0f1115' };
+const THEMES = {
+  glass: { background: '#eeebfc', titleBar: 'light' },
+  dark: { background: '#17162f', titleBar: 'dark' },
+  classic: { background: '#0f1115', titleBar: 'system' }
+};
 ipcMain.handle('app:theme', (event, name) => {
-  theme = name === 'classic' ? 'classic' : 'glass';
-  if (win && !win.isDestroyed()) win.setBackgroundColor(THEME_BACKGROUND[theme]);
+  if (!THEMES[name]) return;
+  theme = name;
+  nativeTheme.themeSource = THEMES[theme].titleBar;
+  if (win && !win.isDestroyed()) win.setBackgroundColor(THEMES[theme].background);
   updateTray();
 });
 const chooseTheme = name => { if (win && !win.isDestroyed()) win.webContents.send('app:theme-chosen', name); };
@@ -187,6 +193,7 @@ function updateTray() {
     { label: 'Mute microphone', type: 'checkbox', checked: muted, click: requestMuteToggle },
     { label: 'Appearance', submenu: [
       { label: 'Glass', type: 'radio', checked: theme === 'glass', click: () => chooseTheme('glass') },
+      { label: 'Dark', type: 'radio', checked: theme === 'dark', click: () => chooseTheme('dark') },
       { label: 'Classic', type: 'radio', checked: theme === 'classic', click: () => chooseTheme('classic') }
     ] },
     { type: 'separator' },

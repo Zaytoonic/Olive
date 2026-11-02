@@ -15,6 +15,7 @@ const state = {
   nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M', theme: 'glass'
 };
 
+const THEMES = ['glass', 'dark', 'classic'];
 const $ = id => document.getElementById(id);
 const MIN_DB = -60;
 const dbToPct = db => Math.max(0, Math.min(100, (db - MIN_DB) / -MIN_DB * 100));
@@ -380,10 +381,13 @@ const EQ_PRESETS = {
 };
 const GRAPH_COLORS = {
   classic: { gridZero: '#48484a', grid: '#2c2c2e', vertical: '#232325', label: '#98989d', fill: 'rgba(0,102,204,0.16)', ring: '#fff' },
-  glass: { gridZero: '#b4b3d6', grid: '#e0dff2', vertical: '#ebeaf7', label: '#4f4e78', fill: 'rgba(124,108,240,0.16)', ring: '#26254a' }
+  glass: { gridZero: '#b4b3d6', grid: '#e0dff2', vertical: '#ebeaf7', label: '#4f4e78', fill: 'rgba(124,108,240,0.16)', ring: '#26254a',
+           curve: [[0, '#35a7cf'], [0.4, '#5f6fe8'], [0.7, '#8f5fe6'], [1, '#d7558f']] },
+  dark: { gridZero: 'rgba(255,255,255,0.32)', grid: 'rgba(255,255,255,0.11)', vertical: 'rgba(255,255,255,0.07)', label: '#c9c8ea', fill: 'rgba(142,168,245,0.16)', ring: '#f3f2ff',
+          curve: [[0, '#6fd3e6'], [0.4, '#8ea8f5'], [0.7, '#b18cf2'], [1, '#f09ac6']] }
 };
 const GLASS_BANDS = { bass: '#5b9df0', lowmid: '#8b7cf6', mid: '#c17df2', presence: '#f06fa6', brilliance: '#f5a25d', air: '#4fc7d6' };
-const bandColor = d => (state.theme === 'glass' ? GLASS_BANDS[d.key] : d.color);
+const bandColor = d => (state.theme === 'classic' ? d.color : GLASS_BANDS[d.key]);
 const eq = { on: true, lowCut: false, b: {} };          // b[key] = { f: Hz, g: dB, q }
 const bandDef = key => EQ_BANDS.find(d => d.key === key);
 function resetBand(key) { const d = bandDef(key); eq.b[key] = { f: d.freq, g: 0, q: d.q }; }
@@ -629,9 +633,9 @@ function drawEqCurve() {
   path(total); ctx.lineTo(x1, y0); ctx.lineTo(x0, y0); ctx.closePath();
   ctx.fillStyle = colors.fill; ctx.fill();
   let curveColor = '#2997ff';
-  if (state.theme === 'glass') {                        // an iridescent line across the graph
+  if (colors.curve) {                                   // an iridescent line across the graph
     curveColor = ctx.createLinearGradient(x0, 0, x1, 0);
-    [[0, '#35a7cf'], [0.4, '#5f6fe8'], [0.7, '#8f5fe6'], [1, '#d7558f']].forEach(([at, c]) => curveColor.addColorStop(at, c));
+    colors.curve.forEach(([at, c]) => curveColor.addColorStop(at, c));
   }
   path(total); ctx.strokeStyle = curveColor; ctx.lineWidth = 2; ctx.stroke();
 
@@ -1211,7 +1215,7 @@ function loadPrefs() {
   state.compAmount = num(p.compAmount, 0, 100, state.compAmount);
   state.muteHotkey = p.muteHotkey !== false;
   if (typeof p.muteAccel === 'string') state.muteAccel = p.muteAccel;
-  state.theme = p.theme === 'classic' ? 'classic' : 'glass';
+  state.theme = THEMES.includes(p.theme) ? p.theme : 'glass';
   sendWanted = true;                             // Send to Discord is always on at launch;
   state.send = true;                             // loadDevices() connects the cable once devices are known
   devicesCollapsed = p.devicesCollapsed === true;
@@ -1390,12 +1394,16 @@ async function initStartup() {
 }
 
 // ---- Appearance ----
-// Glass or Classic: instant, remembered, and it changes nothing but the look. Classic means no theme attribute at all,
-// so styles.css applies exactly as it always has.
+// Instant, remembered, and it changes nothing but the look. Classic means no theme attribute at all, so styles.css applies
+// exactly as it always has. Dark is the Glass style with its dark tokens.
 function applyTheme(name) {
-  state.theme = name === 'classic' ? 'classic' : 'glass';
-  if (state.theme === 'glass') document.documentElement.dataset.theme = 'glass';
-  else delete document.documentElement.dataset.theme;
+  state.theme = THEMES.includes(name) ? name : 'glass';
+  const root = document.documentElement;
+  if (state.theme === 'classic') { delete root.dataset.theme; delete root.dataset.mode; }
+  else {
+    root.dataset.theme = 'glass';
+    if (state.theme === 'dark') root.dataset.mode = 'dark'; else delete root.dataset.mode;
+  }
   $('themeSelect').value = state.theme;
   renderEqChips();
   for (const c of $('eqChips').children) c.setAttribute('aria-selected', String(c.dataset.key === eqSel));
