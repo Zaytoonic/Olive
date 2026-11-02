@@ -401,9 +401,30 @@ async function liveChecks(profile, wav, fixture) {
       check('a rescan does not restart a healthy capture', mic.rescanKeepsCapture, `capture kept: ${mic.rescanKeepsCapture}`);
       check('unplugged: falls back and says so', mic.unplugged.current === mic.names[0] && mic.unplugged.notice.includes(mic.names[1]) && mic.unplugged.bass === -4 && mic.unplugged.stillPreferred === mic.names[1], `using ${mic.unplugged.current}, "${mic.unplugged.notice}"`);
       check('plugged back in: returns to the preferred mic', mic.replugged.current === mic.names[1] && !mic.replugged.notice && mic.replugged.bass === 5 && mic.replugged.capturing, `using ${mic.replugged.current}, EQ bass ${mic.replugged.bass}`);
+      console.log('\nStart-up and recovery');
+      const retry = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('not ready', 'AbortError'); };
+        await loadDevices();
+        const during = { live, status: $('devStatus').textContent, retrying: startupRetries > 0 };
+        delete navigator.mediaDevices.getUserMedia;
+        await wait(6500);
+        return { during, recovered: live, capturing: !!stream, status: $('devStatus').textContent };
+      });
+      check('audio not ready at login: it keeps trying and recovers', retry.during.live === false && retry.during.retrying && retry.recovered && retry.capturing && !retry.status, `first attempt live: ${retry.during.live}, recovered: ${retry.recovered}, capturing: ${retry.capturing}`);
+      const helperPid = () => { try { return execFileSync('powershell.exe', ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "Name='win-audio.exe'" | Where-Object { $_.ParentProcessId -eq ${copy.proc.pid} }).ProcessId`]).toString().trim(); } catch { return ''; } };
+      const pidBefore = helperPid();
+      if (pidBefore) {
+        execFileSync('taskkill', ['/PID', pidBefore, '/F'], { stdio: 'ignore' });
+        await sleep(5000);
+        const pidAfter = helperPid();
+        const answers = await copy.call(async () => { const l = await sysApi.list(); return Array.isArray(l) && !!(await sysApi.get(l[0].id)).id; });
+        check('the Windows helper restarts itself after a crash', !!pidAfter && pidAfter !== pidBefore && answers, `helper ${pidBefore} killed, now ${pidAfter}, answering: ${answers}`);
+      } else check('the Windows helper restarts itself after a crash', false, 'could not find this copy\'s helper');
       console.log('\nOne engine at a time');
       // The fake mic has no virtual cable, so this builds a send chain on the default (muted) output instead.
       const chainUse = await copy.call(async () => {
+        clearTimeout(startupRetryTimer); startupRetries = 99;   // no cable here: stop looking, or the retry removes the stand-in chain
         const wait = ms => new Promise(r => setTimeout(r, ms)), level = async () => { let p = 0; for (let i = 0; i < 100; i++) { p = Math.max(p, chainAmplitude(meterChain())); await wait(30); } return 20 * Math.log10(p + 1e-9); };
         const saved = state.nrAmount; state.nr = false; applyNr();
         state.gateAuto = false; state.gateDb = -60;      // gate wide open: the file's noise-only part must still reach the meter

@@ -47,6 +47,10 @@ function getHelper(allowRestart) {
         '-File', path.join(__dirname, 'win-audio.ps1')
       ]);
     helper.onEvent = ev => { if (ev === 'mic-key' && win && !win.isDestroyed()) win.webContents.send('mute:mic-key'); };
+    const started = helper;
+    helper.onDeath = () => {                   // not when quitting; wait a little so a failing helper can't spin
+      if (!quitting && helper === started) setTimeout(() => { if (!quitting) getHelper(true); }, 3000);
+    };
   }
   return helper;
 }
@@ -61,7 +65,13 @@ ipcMain.handle('sysmic', (event, cmd, ...args) => {
 // ---- Start with Windows: launches hidden in the tray at login ----
 const HIDDEN_ARG = '--hidden';
 const startedHidden = process.argv.includes(HIDDEN_ARG);
-const loginItemOpts = () => ({ path: process.execPath, args: [HIDDEN_ARG] });
+// Quoted: the install path has spaces, and an unquoted one makes Windows guess where the program name ends.
+const loginItemOpts = () => ({ path: `"${process.execPath}"`, args: [HIDDEN_ARG] });
+function upgradeLoginItem() {                 // an entry saved by an older version has no quotes
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  const old = { path: process.execPath, args: [HIDDEN_ARG] };
+  if (app.getLoginItemSettings(old).openAtLogin) app.setLoginItemSettings({ openAtLogin: true, ...loginItemOpts() });
+}
 // Only the built app may register itself. From source (npm start) process.execPath is the bare electron.exe, which
 // at login has no app to load and opens Electron's "run this command" welcome window.
 ipcMain.handle('startup:get', () => {
@@ -100,6 +110,8 @@ function createWindow() {
     icon: path.join(ASSETS, 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, autoplayPolicy: 'no-user-gesture-required', backgroundThrottling: false, spellcheck: false }
   });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', e => e.preventDefault());
   win.loadFile(path.join(RENDERER, 'index.html'));
   win.once('ready-to-show', () => { if (!startedHidden) win.show(); });
   // With backgroundThrottling off, the page can't tell it's hidden (document.hidden stays false),
@@ -182,6 +194,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', showWindow);
 
   app.whenReady().then(() => {
+    upgradeLoginItem();
     protocol.handle('app', serveWorklet);
     // Allow microphone access for the app's own page only (no camera, no other permissions).
     session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => {
