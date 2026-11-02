@@ -1,12 +1,14 @@
 # Mic Manager helper: controls Windows microphone (capture) endpoints via Core Audio.
 # Protocol: one request per stdin line "id<TAB>cmd<TAB>args...", one JSON reply per stdout line.
 # Commands: list | get <endpointId> | setvol <endpointId> <0..1> | setmute <endpointId> <0|1>
+# Also prints {"event":"mic-key"} when an ASUS laptop's dedicated mic key is pressed.
 $ErrorActionPreference = 'Stop'
 
-Add-Type -TypeDefinition @'
+Add-Type -ReferencedAssemblies System.Management -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Management;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -69,6 +71,29 @@ namespace MicManager
         [PreserveSig] int GetChannelVolumeLevelScalar(uint channel, out float level);
         [PreserveSig] int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid eventContext);
         [PreserveSig] int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+    }
+
+    // ASUS laptops report the dedicated mic key as firmware event 124. Other PCs simply don't have this event class.
+    public static class AsusKeys
+    {
+        const uint MIC_KEY = 124;
+        static ManagementEventWatcher watcher;
+
+        public static void Start()
+        {
+            try
+            {
+                watcher = new ManagementEventWatcher(new ManagementScope(@"root\wmi"), new WqlEventQuery("SELECT * FROM AsusAtkWmiEvent"));
+                watcher.EventArrived += (sender, e) =>
+                {
+                    if (Convert.ToUInt32(e.NewEvent["EventID"]) != MIC_KEY) return;
+                    Console.Out.WriteLine("{\"event\":\"mic-key\"}");
+                    Console.Out.Flush();
+                };
+                watcher.Start();
+            }
+            catch (Exception) { }
+        }
     }
 
     public static class Audio
@@ -220,6 +245,7 @@ namespace MicManager
 }
 '@
 
+[MicManager.AsusKeys]::Start()
 [Console]::Out.WriteLine('{"id":0,"ok":true,"result":"ready"}')
 [Console]::Out.Flush()
 while ($true) {

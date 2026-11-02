@@ -35,6 +35,7 @@ class HelperClient {
       if (!line.startsWith('{')) continue;
       let msg;
       try { msg = JSON.parse(line); } catch { continue; }
+      if (msg.event) { if (this.onEvent) this.onEvent(msg.event); continue; }
       const p = this.pending.get(msg.id);
       if (!p) continue;
       this.pending.delete(msg.id);
