@@ -1,7 +1,8 @@
-/* The Glass look: pastel light and glossy, translucent surfaces. Applies only while html has data-theme="glass",
-   so the classic look in styles.css stays exactly as it is; delete this file and the look is gone.
-   See DESIGN.md. No backdrop-filter: live blur is expensive with graphics acceleration off, so translucency comes from
-   semi-transparent white over one still background. */
+/* The Glass style: glossy, translucent surfaces and iridescent highlights, in two moods. Applies only while html has
+   data-theme="glass", so the classic look in styles.css stays exactly as it is; delete this file and both are gone.
+   See DESIGN.md. All rules below use the tokens; dark mode (data-mode="dark") only changes token values.
+   No backdrop-filter: live blur is expensive with graphics acceleration off, so translucency comes from
+   semi-transparent surfaces over one still background. */
 html[data-theme="glass"] {
   color-scheme: light;
   --canvas: #e8e4fb;
@@ -21,15 +22,111 @@ html[data-theme="glass"] {
   --iris-strong: linear-gradient(100deg, #49b7d8 0%, #6d7fee 50%, #8f62e6 100%);
   --pearl: radial-gradient(circle at 35% 28%, #ffffff 0%, #ffffff 38%, #ece9fb 100%);
   --gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.5));
-}
-html[data-theme="glass"] body {
-  background:
+  --mesh:
     radial-gradient(60% 55% at 12% 8%, #d9ecfd 0%, rgba(217, 236, 253, 0) 100%),
     radial-gradient(55% 60% at 92% 14%, #fbe2ef 0%, rgba(251, 226, 239, 0) 100%),
     radial-gradient(70% 60% at 82% 96%, #dbf5ec 0%, rgba(219, 245, 236, 0) 100%),
     radial-gradient(60% 60% at 8% 92%, #e6ddfc 0%, rgba(230, 221, 252, 0) 100%),
     #eeebfc;
+  --surface-edge: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --row-hover: rgba(255, 255, 255, 0.6);
+  --hero-fill: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.72));
+  --hero-edge: inset 0 1px 0 #fff;
+  --hero-shadow: 0 18px 44px rgba(101, 84, 224, 0.14);
+  --hero-muted-fill: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.76));
+  --hero-muted-border: linear-gradient(100deg, #ee7fa8, #cf2d68);
+  --hero-muted-shadow: 0 18px 44px rgba(207, 45, 104, 0.14);
+  --picker-hover: rgba(101, 84, 224, 0.08);
+  --option-bg: #fff;
+  --warn-text: #8a5600;
+  --banner-bg: rgba(207, 45, 104, 0.11);
+  --banner-text: #a81e50;
+  --tube: #eeedfb;
+  --tube-inset: inset 0 1px 3px rgba(79, 78, 120, 0.2);
+  --tube-inset-small: inset 0 1px 2px rgba(79, 78, 120, 0.18);
+  --tube-gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.08));
+  --level: linear-gradient(90deg, #62d8bb 0%, #72c6ef 48%, #a995f2 72%, #f2a7c3 88%, #cf2d68 100%);
+  --level-muted: grayscale(1) brightness(1.25);
+  --gate-mark: #e0752f;
+  --pebble: linear-gradient(180deg, #ffffff, #efedfb);
+  --pebble-hover: linear-gradient(180deg, #ffffff, #e6e3fa);
+  --pebble-edge: inset 0 1px 0 #fff;
+  --pebble-shadow: rgba(101, 84, 224, 0.16);
+  --pebble-small-shadow: rgba(101, 84, 224, 0.14);
+  --thread: #d9d8ee;
+  --thumb-shadow: 0 2px 7px rgba(79, 78, 120, 0.32), inset 0 0 0 1px rgba(101, 84, 224, 0.14);
+  --switch-off: #cfcde8;
+  --switch-inset: inset 0 1px 3px rgba(79, 78, 120, 0.22);
+  --switch-thumb-shadow: 0 2px 6px rgba(79, 78, 120, 0.32);
+  --graph: rgba(255, 255, 255, 0.74);
+  --graph-inset: inset 0 1px 4px rgba(79, 78, 120, 0.12);
+  --chip: linear-gradient(180deg, #ffffff, #f1effc);
+  --chip-selected-text: #1b1a38;
+  --scroll: rgba(101, 84, 224, 0.28);
+  --scroll-hover: rgba(101, 84, 224, 0.42);
 }
+
+/* Dark mode: the same forms and iridescence, in soft light on deep indigo */
+html[data-theme="glass"][data-mode="dark"] {
+  color-scheme: dark;
+  --canvas: #17162f;
+  --surface: rgba(255, 255, 255, 0.08);
+  --tile: rgba(255, 255, 255, 0.12);
+  --text: #f3f2ff;
+  --text-2: #c9c8ea;
+  --accent: #6f60e6;
+  --accent-text: #c0b8ff;
+  --hairline: rgba(255, 255, 255, 0.1);
+  --green: #62d8bb; --yellow: #f4c36b; --red: #ff6f9f; --orange: #f5a25d;
+  --shadow: 0 14px 34px rgba(5, 4, 24, 0.32);
+  --iris: linear-gradient(100deg, #6fd3e6 0%, #8ea8f5 38%, #b18cf2 68%, #f09ac6 100%);
+  --iris-strong: linear-gradient(100deg, #5cc7e3 0%, #7f8ff5 50%, #a877ef 100%);
+  --pearl: radial-gradient(circle at 35% 28%, #ffffff 0%, #f5f4ff 40%, #c9c6ee 100%);
+  --gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
+  --mesh:
+    radial-gradient(60% 55% at 12% 8%, #1f2c5c 0%, rgba(31, 44, 92, 0) 100%),
+    radial-gradient(55% 60% at 92% 14%, #3b2150 0%, rgba(59, 33, 80, 0) 100%),
+    radial-gradient(70% 60% at 82% 96%, #143d44 0%, rgba(20, 61, 68, 0) 100%),
+    radial-gradient(60% 60% at 8% 92%, #2b2163 0%, rgba(43, 33, 99, 0) 100%),
+    #17162f;
+  --surface-edge: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  --row-hover: rgba(255, 255, 255, 0.08);
+  --hero-fill: linear-gradient(180deg, #2c2b56, #211f45);
+  --hero-edge: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  --hero-shadow: 0 18px 44px rgba(5, 4, 24, 0.42);
+  --hero-muted-fill: linear-gradient(180deg, #3b2448, #2b1b3d);
+  --hero-muted-border: linear-gradient(100deg, #f58db4, #e0497f);
+  --hero-muted-shadow: 0 18px 44px rgba(90, 16, 52, 0.38);
+  --picker-hover: rgba(255, 255, 255, 0.09);
+  --option-bg: #2a2950;
+  --warn-text: #f4c36b;
+  --banner-bg: rgba(255, 111, 159, 0.15);
+  --banner-text: #ffc2d6;
+  --tube: #17162f;
+  --tube-inset: inset 0 1px 3px rgba(0, 0, 0, 0.42);
+  --tube-inset-small: inset 0 1px 2px rgba(0, 0, 0, 0.36);
+  --tube-gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0.03));
+  --level: linear-gradient(90deg, #62d8bb 0%, #72c6ef 48%, #a995f2 72%, #f2a7c3 88%, #ff5c92 100%);
+  --level-muted: grayscale(1) brightness(0.85);
+  --gate-mark: #f5a25d;
+  --pebble: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08));
+  --pebble-hover: linear-gradient(180deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.12));
+  --pebble-edge: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  --pebble-shadow: rgba(5, 4, 24, 0.3);
+  --pebble-small-shadow: rgba(5, 4, 24, 0.26);
+  --thread: #3e3d6a;
+  --thumb-shadow: 0 2px 7px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  --switch-off: #3e3d6a;
+  --switch-inset: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+  --switch-thumb-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  --graph: rgba(255, 255, 255, 0.05);
+  --graph-inset: inset 0 1px 4px rgba(0, 0, 0, 0.28);
+  --chip: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.06));
+  --scroll: rgba(192, 184, 255, 0.28);
+  --scroll-hover: rgba(192, 184, 255, 0.44);
+}
+
+html[data-theme="glass"] body { background: var(--mesh); }
 
 /* Quiet type: sentence case labels and one family throughout */
 html[data-theme="glass"] h1 { font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif; font-weight: 600; letter-spacing: -0.015em; }
@@ -56,49 +153,49 @@ html[data-theme="glass"] body.devices-collapsed .devices { width: 0; padding: 0;
 /* Surfaces: translucent with a soft top highlight */
 html[data-theme="glass"] .group {
   background: var(--gloss);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), var(--shadow);
+  box-shadow: var(--surface-edge), var(--shadow);
 }
-html[data-theme="glass"] #deviceList li:hover { background: rgba(255, 255, 255, 0.6); }
+html[data-theme="glass"] #deviceList li:hover { background: var(--row-hover); }
 
 /* The one memorable thing: the top card with an iridescent edge, holding the level as light in a glass tube */
 html[data-theme="glass"] .hero.group {
   border: 1.5px solid transparent;
   border-radius: 32px;
   padding: 20px 22px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.72)) padding-box, var(--iris) border-box;
-  box-shadow: inset 0 1px 0 #fff, 0 18px 44px rgba(101, 84, 224, 0.14);
+  background: var(--hero-fill) padding-box, var(--iris) border-box;
+  box-shadow: var(--hero-edge), var(--hero-shadow);
 }
 html[data-theme="glass"] .hero.is-muted {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.76)) padding-box, linear-gradient(100deg, #ee7fa8, #cf2d68) border-box;
-  box-shadow: inset 0 1px 0 #fff, 0 18px 44px rgba(207, 45, 104, 0.14);
+  background: var(--hero-muted-fill) padding-box, var(--hero-muted-border) border-box;
+  box-shadow: var(--hero-edge), var(--hero-muted-shadow);
 }
-html[data-theme="glass"] select.current-name:hover { background: rgba(101, 84, 224, 0.08); }
-html[data-theme="glass"] select.current-name option { background: #fff; }
+html[data-theme="glass"] select.current-name:hover { background: var(--picker-hover); }
+html[data-theme="glass"] select.current-name option { background: var(--option-bg); }
 html[data-theme="glass"] .notice,
-html[data-theme="glass"] #sendHint.warn { color: #8a5600; }
-html[data-theme="glass"] .muted-banner { background: rgba(207, 45, 104, 0.11); color: #a81e50; border-radius: 16px; }
+html[data-theme="glass"] #sendHint.warn { color: var(--warn-text); }
+html[data-theme="glass"] .muted-banner { background: var(--banner-bg); color: var(--banner-text); border-radius: 16px; }
 
-html[data-theme="glass"] .meter { height: 20px; background: #eeedfb; box-shadow: inset 0 1px 3px rgba(79, 78, 120, 0.2); }
-html[data-theme="glass"] .meter-fill { background: linear-gradient(90deg, #62d8bb 0%, #72c6ef 48%, #a995f2 72%, #f2a7c3 88%, #cf2d68 100%); }
-html[data-theme="glass"] .meter.muted .meter-fill { filter: grayscale(1) brightness(1.25); }
-html[data-theme="glass"] .meter-cover { background: #eeedfb; }
+html[data-theme="glass"] .meter { height: 20px; background: var(--tube); box-shadow: var(--tube-inset); }
+html[data-theme="glass"] .meter-fill { background: var(--level); }
+html[data-theme="glass"] .meter.muted .meter-fill { filter: var(--level-muted); }
+html[data-theme="glass"] .meter-cover { background: var(--tube); }
 html[data-theme="glass"] .meter::after {       /* the gloss on the tube; never repaints */
   content: ""; position: absolute; left: 6px; right: 6px; top: 2px; height: 42%; border-radius: 9999px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.08)); pointer-events: none;
+  background: var(--tube-gloss); pointer-events: none;
 }
 html[data-theme="glass"] .meter-peak::before { background: var(--text); }
-html[data-theme="glass"] .gate-mark { background: #e0752f; }
-html[data-theme="glass"] .mini-meter { background: #eeedfb; box-shadow: inset 0 1px 2px rgba(79, 78, 120, 0.18); }
-html[data-theme="glass"] .mini-fill { background: linear-gradient(90deg, #62d8bb 0%, #72c6ef 48%, #a995f2 72%, #f2a7c3 88%, #cf2d68 100%); }
-html[data-theme="glass"] .mini-cover { background: #eeedfb; }
+html[data-theme="glass"] .gate-mark { background: var(--gate-mark); }
+html[data-theme="glass"] .mini-meter { background: var(--tube); box-shadow: var(--tube-inset-small); }
+html[data-theme="glass"] .mini-fill { background: var(--level); }
+html[data-theme="glass"] .mini-cover { background: var(--tube); }
 html[data-theme="glass"] .send-level .value { color: var(--text-2); }
 
 /* Pills are polished pebbles */
 html[data-theme="glass"] .pill {
-  background: linear-gradient(180deg, #ffffff, #efedfb);
-  box-shadow: inset 0 1px 0 #fff, 0 3px 10px rgba(101, 84, 224, 0.16);
+  background: var(--pebble);
+  box-shadow: var(--pebble-edge), 0 3px 10px var(--pebble-shadow);
 }
-html[data-theme="glass"] .pill:hover { background: linear-gradient(180deg, #ffffff, #e6e3fa); }
+html[data-theme="glass"] .pill:hover { background: var(--pebble-hover); }
 html[data-theme="glass"] .pill.listen.on { background: linear-gradient(180deg, #6f60e6, #5645d4); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 4px 12px rgba(86, 69, 212, 0.3); }
 html[data-theme="glass"] .pill.mute.on { background: linear-gradient(180deg, #cf3a73, #b3205a); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 4px 12px rgba(191, 37, 96, 0.3); }
 html[data-theme="glass"] .pill.small.capturing { background: linear-gradient(180deg, #6f60e6, #5645d4); color: #fff; }
@@ -106,34 +203,34 @@ html[data-theme="glass"] .pill.small.capturing { background: linear-gradient(180
 /* Sliders: an iridescent thread and a pearl */
 html[data-theme="glass"] input[type=range]::-webkit-slider-runnable-track {
   height: 6px;
-  background: linear-gradient(to right, transparent var(--fill), #d9d8ee var(--fill)), var(--iris-strong);
+  background: linear-gradient(to right, transparent var(--fill), var(--thread) var(--fill)), var(--iris-strong);
 }
 html[data-theme="glass"] input[type=range]::-webkit-slider-thumb {
   margin-top: -9px; background: var(--pearl);
-  box-shadow: 0 2px 7px rgba(79, 78, 120, 0.32), inset 0 0 0 1px rgba(101, 84, 224, 0.14);
+  box-shadow: var(--thumb-shadow);
 }
 html[data-theme="glass"] input[type=range]:disabled { opacity: 0.5; }
 
 /* Switches */
-html[data-theme="glass"] .switch span { background: #cfcde8; box-shadow: inset 0 1px 3px rgba(79, 78, 120, 0.22); }
-html[data-theme="glass"] .switch span::before { background: var(--pearl); box-shadow: 0 2px 6px rgba(79, 78, 120, 0.32); }
+html[data-theme="glass"] .switch span { background: var(--switch-off); box-shadow: var(--switch-inset); }
+html[data-theme="glass"] .switch span::before { background: var(--pearl); box-shadow: var(--switch-thumb-shadow); }
 html[data-theme="glass"] .switch input:checked + span { background: var(--iris-strong); }
 
 /* EQ */
-html[data-theme="glass"] select { background: linear-gradient(180deg, #ffffff, #efedfb); box-shadow: 0 2px 7px rgba(101, 84, 224, 0.14); }
+html[data-theme="glass"] select { background: var(--pebble); box-shadow: 0 2px 7px var(--pebble-small-shadow); }
 html[data-theme="glass"] select.current-name { background: transparent; box-shadow: none; }
-html[data-theme="glass"] select option { background: #fff; color: var(--text); }
-html[data-theme="glass"] #eqCurve { background: rgba(255, 255, 255, 0.74); border-radius: 18px; box-shadow: inset 0 1px 4px rgba(79, 78, 120, 0.12); }
-html[data-theme="glass"] .eq-chip { background: linear-gradient(180deg, #ffffff, #f1effc); }
-html[data-theme="glass"] .eq-chip[aria-selected="true"] { background: var(--band); color: #1b1a38; }
-html[data-theme="glass"] .eq-readout button { background: linear-gradient(180deg, #ffffff, #efedfb); box-shadow: 0 2px 6px rgba(101, 84, 224, 0.14); }
+html[data-theme="glass"] select option { background: var(--option-bg); color: var(--text); }
+html[data-theme="glass"] #eqCurve { background: var(--graph); border-radius: 18px; box-shadow: var(--graph-inset); }
+html[data-theme="glass"] .eq-chip { background: var(--chip); }
+html[data-theme="glass"] .eq-chip[aria-selected="true"] { background: var(--band); color: var(--chip-selected-text); }
+html[data-theme="glass"] .eq-readout button { background: var(--pebble); box-shadow: 0 2px 6px var(--pebble-small-shadow); }
 html[data-theme="glass"] .lowcut input { accent-color: var(--accent); }
 
 /* Scrollbar with the same gentle curves */
 html[data-theme="glass"] .panel::-webkit-scrollbar { width: 10px; }
 html[data-theme="glass"] .panel::-webkit-scrollbar-track { background: transparent; }
-html[data-theme="glass"] .panel::-webkit-scrollbar-thumb { background: rgba(101, 84, 224, 0.28); border-radius: 9999px; border: 2px solid transparent; background-clip: padding-box; }
-html[data-theme="glass"] .panel::-webkit-scrollbar-thumb:hover { background: rgba(101, 84, 224, 0.42); border: 2px solid transparent; background-clip: padding-box; }
+html[data-theme="glass"] .panel::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 9999px; border: 2px solid transparent; background-clip: padding-box; }
+html[data-theme="glass"] .panel::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover); border: 2px solid transparent; background-clip: padding-box; }
 
 @media (prefers-reduced-motion: reduce) {
   html[data-theme="glass"] * { transition: none !important; }

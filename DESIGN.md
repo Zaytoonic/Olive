@@ -1,6 +1,6 @@
 # Mic Manager design
 
-The app has two looks. Choose one under **App > Appearance**, or from the tray icon's menu. Settings and sound stay the same.
+The app has three looks. Choose one under **App > Appearance**, or from the tray icon's menu. Settings and sound stay the same.
 
 ## Glass (`src/renderer/theme-glass.css`)
 Brief: translucent, smooth and glossy, soft even lighting, pastel with iridescent highlights, minimal, focused on form, serene, gentle curves. Avoid low contrast, harsh shadows, clutter, dark colors, sharp edges and pixelation.
@@ -19,8 +19,19 @@ Brief: translucent, smooth and glossy, soft even lighting, pastel with iridescen
 - **Translucency without blur:** semi-transparent white over one still background. Live blur costs too much CPU with graphics acceleration off.
 - **Contrast:** text meets WCAG AA (4.5:1) over the darkest background it can sit on.
 
+## Dark (also `theme-glass.css`)
+The Glass style in dark mode: the same forms, glossy pebbles, pearl controls and iridescence, as soft light on deep indigo. Every rule is shared with Glass, and only the token values differ.
+
+| Token | Value | Use |
+|---|---|---|
+| Moonlight | `#f3f2ff` | Main text |
+| Soft moonlight | `#c9c8ea` | Secondary text |
+| Deep indigo | `#17162f` | Base, never pure black |
+| Dusk | `#1f2c5c`, `#3b2150`, `#143d44`, `#2b2163` | Still background wash |
+| Iridescence | Same as Glass | Top card's edge and the EQ curve |
+
 ## Classic (`src/renderer/styles.css`)
-The original dark look, following Apple's interface guidelines: clarity, deference, depth. Glass only adds rules scoped to `html[data-theme="glass"]`, so Classic is unchanged by it.
+The original dark look, following Apple's interface guidelines: clarity, deference, depth. Glass and Dark only add rules scoped to `html[data-theme="glass"]`, so Classic is unchanged by them.
 
 ## Rolling back
 - **Any time:** switch to Classic in the app. The choice is remembered.
