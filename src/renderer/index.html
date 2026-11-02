@@ -169,11 +169,14 @@
       <h3 class="group-title">Equalizer</h3>
       <div class="group">
         <div class="row card eq">
-          <div class="row-head">
-            <div class="eq-title">
-              <span class="row-title">Mic EQ</span>
-              <div class="hint" id="eqFor"></div>
-            </div>
+          <div class="row-head eq-top">
+            <button type="button" id="eqExpand" class="eq-summary" aria-expanded="false" aria-controls="eqBody" title="Show or hide the EQ graph">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><polyline points="7.5 4.5 13 10 7.5 15.5"/></svg>
+              <span class="eq-title">
+                <span class="row-title">Mic EQ</span>
+                <span class="hint" id="eqFor"></span>
+              </span>
+            </button>
             <div class="eq-head">
               <select id="eqPreset" title="Preset">
                 <option value="myvoice">My voice (tuned)</option>
@@ -186,12 +189,14 @@
               <label class="switch" title="Enable EQ"><input type="checkbox" id="eqToggle" checked><span></span></label>
             </div>
           </div>
-          <canvas id="eqCurve" width="600" height="220" tabindex="0" aria-label="EQ graph: drag points to shape your sound"></canvas>
-          <div class="eq-tools">
-            <div class="eq-chips" id="eqChips" role="tablist" aria-label="EQ bands"></div>
-            <div class="eq-readout" id="eqReadout" aria-live="polite"></div>
+          <div id="eqBody" hidden>
+            <canvas id="eqCurve" width="600" height="220" tabindex="0" aria-label="EQ graph: drag points to shape your sound"></canvas>
+            <div class="eq-tools">
+              <div class="eq-chips" id="eqChips" role="tablist" aria-label="EQ bands"></div>
+              <div class="eq-readout" id="eqReadout" aria-live="polite"></div>
+            </div>
+            <label class="lowcut"><input type="checkbox" id="lowCut"> Low cut (80 Hz) · removes rumble and desk thumps</label>
           </div>
-          <label class="lowcut"><input type="checkbox" id="lowCut"> Low cut (80 Hz) · removes rumble and desk thumps</label>
         </div>
       </div>
     </section>
