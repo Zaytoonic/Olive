@@ -16,7 +16,11 @@ contextBridge.exposeInMainWorld('appMute', {
   onToggle: cb => { ipcRenderer.on('mute:toggle', () => cb()); },
   onMicKey: cb => { ipcRenderer.on('mute:mic-key', () => cb()); },
   setState: on => ipcRenderer.invoke('mute:state', on === true),
-  setHotkey: on => ipcRenderer.invoke('mute:hotkey', on === true)
+  setHotkey: accelerator => ipcRenderer.invoke('mute:hotkey', typeof accelerator === 'string' ? accelerator : null)
+});
+
+contextBridge.exposeInMainWorld('appInfo', {
+  version: () => ipcRenderer.invoke('app:version')
 });
 
 contextBridge.exposeInMainWorld('appStartup', {

@@ -120,8 +120,8 @@ function createWindow() {
 }
 
 // ---- Mute from anywhere: a system-wide hotkey and the tray. The page owns the mute state and reports it back. ----
-const MUTE_HOTKEY = 'Control+Alt+M';
-let muted = false, lastPress = 0;
+const VALID_HOTKEY = /^(?:(?:Control|Alt|Shift|Super)\+)*(?:[A-Z0-9]|F(?:[1-9]|1\d|2[0-4]))$/;
+let muted = false, lastPress = 0, muteHotkey = null;
 function requestMuteToggle() {
   // Windows repeats a held hotkey (first repeat after about 500 ms), and each repeat restarts this wait,
   // so holding the keys toggles once however long they stay down.
@@ -131,10 +131,17 @@ function requestMuteToggle() {
   if (win && !win.isDestroyed()) win.webContents.send('mute:toggle');
 }
 ipcMain.handle('mute:state', (event, on) => { muted = on === true; updateTray(); });
-ipcMain.handle('mute:hotkey', (event, on) => {
-  if (globalShortcut.isRegistered(MUTE_HOTKEY)) globalShortcut.unregister(MUTE_HOTKEY);
-  return on === true ? globalShortcut.register(MUTE_HOTKEY, requestMuteToggle) : false;   // false if another app holds it
+// Registers this shortcut in place of the current one; none turns it off. Returns false if another app holds it.
+ipcMain.handle('mute:hotkey', (event, accelerator) => {
+  if (muteHotkey) globalShortcut.unregister(muteHotkey);
+  muteHotkey = null;
+  if (typeof accelerator !== 'string' || !VALID_HOTKEY.test(accelerator)) return false;
+  let ok = false;
+  try { ok = globalShortcut.register(accelerator, requestMuteToggle); } catch { ok = false; }
+  if (ok) muteHotkey = accelerator;
+  return ok;
 });
+ipcMain.handle('app:version', () => app.getVersion());
 
 function updateTray() {
   if (!tray) return;
