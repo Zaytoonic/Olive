@@ -9,9 +9,9 @@ The look can be switched between Glass, Dark and Classic in the app; see [DESIGN
 ## Folders
 ```
 src/main/        Electron main process: window, tray, start-with-Windows, Windows mic control
-  main.js          app window, tray, app:// (serves the noise-gate worklet)
+  main.js          app window, tray, app:// (serves the three audio worklets and RNNoise)
   preload.js       safe bridge between the window and main.js
-  sysmic-client.js runs win-audio.ps1 and talks to it
+  sysmic-client.js runs win-audio.exe (win-audio.ps1 is the fallback) and talks to it
   win-audio.cs     Windows Core Audio helper: list mics, set volume / mute; reports the ASUS mic key
   win-audio.ps1    runs that helper through PowerShell if win-audio.exe (built from it, not in git) is missing
 src/renderer/    the window

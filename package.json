@@ -1,6 +1,6 @@
 {
   "name": "mic-manager",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Microphone manager for Windows: Windows mic volume/mute, noise gate, noise reduction, EQ, compressor, send to Discord",
   "main": "src/main/main.js",
   "scripts": {
