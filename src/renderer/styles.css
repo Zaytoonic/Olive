@@ -32,7 +32,7 @@ button, select, input { font: inherit; color: inherit; }
 .toolbar {
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; gap: 12px;
-  padding: 8px 16px; min-height: 60px;
+  padding: 8px 16px; min-height: 61px;
   background: var(--surface);
   border-bottom: 1px solid var(--hairline);
 }
@@ -50,16 +50,10 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
 }
 .icon-btn:hover { background: var(--tile); color: var(--text); }
 .icon-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.icon-btn[aria-expanded="false"] { color: var(--accent-text); }
 
 /* ---- Layout ---- */
 main { flex: 1; display: flex; gap: 16px; padding: 16px; min-height: 0; }
 .panel { overflow: auto; min-height: 0; }
-.devices {
-  width: 296px; flex: none; display: flex; flex-direction: column; gap: 8px;
-  transition: width 200ms ease-out, opacity 150ms ease-out, margin 200ms ease-out;
-}
-body.devices-collapsed .devices { width: 0; opacity: 0; margin-right: -16px; overflow: hidden; pointer-events: none; }
 .controls { flex: 1; padding-right: 4px; max-width: 1440px; container-type: inline-size; }
 .columns { display: block; }
 .col { min-width: 0; }
@@ -68,8 +62,6 @@ body.devices-collapsed .devices { width: 0; opacity: 0; margin-right: -16px; ove
 }
 footer { padding: 8px 16px; font-size: 12px; color: var(--text-2); border-top: 1px solid var(--hairline); }
 
-.section-head { display: flex; justify-content: space-between; align-items: center; padding: 0 4px 0 16px; min-height: 44px; }
-.section-head .icon-btn.small { width: 36px; height: 36px; }
 .group-title { font-size: 13px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); margin: 24px 16px 8px; }
 
 /* Grouped section (inset grouped list) */
@@ -83,35 +75,16 @@ footer { padding: 8px 16px; font-size: 12px; color: var(--text-2); border-top: 1
 .hint { font-size: 13px; color: var(--text-2); margin-top: 4px; }
 .hint:empty { display: none; }
 .value { font-size: 15px; color: var(--text); }
-#devStatus:empty { display: none; }
-#devStatus { padding: 0 16px; }
-
-/* ---- Device list ---- */
-.list { list-style: none; margin: 0; padding: 0; }
-#deviceList li {
-  position: relative; display: flex; flex-direction: column; gap: 2px; justify-content: center;
-  min-height: 44px; padding: 10px 44px 10px 16px; cursor: pointer;
-  transition: background 100ms ease-out, transform 100ms ease-out;
-}
-#deviceList li + li { border-top: 1px solid var(--hairline); }
-#deviceList li:hover { background: var(--tile); }
-#deviceList li:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
-#deviceList li.selected::after {
-  content: ""; position: absolute; right: 18px; top: 50%; width: 6px; height: 12px; margin-top: -8px;
-  border: solid var(--accent-text); border-width: 0 2px 2px 0; transform: rotate(45deg);
-}
-.dev-name { font-size: 15px; font-weight: 500; }
-#deviceList li.selected .dev-name { color: var(--accent-text); }
-.dev-meta { font-size: 12px; color: var(--text-2); }
-.dev-default { color: var(--accent-text); }
 
 /* ---- Hero: selected mic + meter ---- */
 .hero { padding: 16px; }
 .current { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
 .current-text { min-width: 0; flex: 1; }
 .current-text .caption { display: block; }
+.mic-pick { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.mic-pick .icon-btn.small { width: 32px; height: 32px; flex: none; margin-top: 2px; }
 select.current-name {
-  display: block; max-width: 100%; height: auto; margin: 2px 0 0 -8px; padding: 2px 4px;
+  display: block; flex: 0 1 auto; min-width: 0; max-width: 100%; height: auto; margin: 2px 0 0 -8px; padding: 2px 4px;
   background: transparent; border-radius: 8px; color: var(--text);
   font-size: 22px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -134,7 +107,6 @@ select.current-name option { font-size: 15px; font-weight: 400; background: var(
 .eq-title { display: block; min-width: 0; }
 .eq-title .row-title { display: block; }
 .eq-title .hint { display: block; margin-top: 0; }
-.dev-meta:empty { display: none; }
 .current-actions { display: flex; gap: 8px; flex: none; }
 .pill {
   height: 44px; min-width: 104px; padding: 0 20px; border-radius: 9999px; border: 0; cursor: pointer;
@@ -200,8 +172,8 @@ input[type=range]:disabled { opacity: .35; cursor: default; }
 .switch input:disabled + span { opacity: .4; cursor: not-allowed; }
 
 /* ---- Instant feedback on press ---- */
-.pill, .icon-btn, .switch span, #deviceList li, select { transition: transform 100ms ease-out, background 100ms ease-out; }
-.pill:active, .icon-btn:active, .switch:active span, #deviceList li:active, select:active { transform: scale(0.97); }
+.pill, .icon-btn, .switch span, select { transition: transform 100ms ease-out, background 100ms ease-out; }
+.pill:active, .icon-btn:active, .switch:active span, select:active { transform: scale(0.97); }
 
 /* ---- Processing cards ---- */
 #sendHint.warn { color: var(--yellow); }
@@ -245,6 +217,5 @@ select {
 .eq.off .eq-tools, .eq.off #eqCurve, .eq.off .lowcut { opacity: .4; }
 
 @media (max-width: 860px) {
-  .devices { width: 240px; }
   #eqCurve { height: 180px; }
 }

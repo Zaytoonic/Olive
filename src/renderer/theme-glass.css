@@ -140,22 +140,18 @@ html[data-theme="glass"] .toolbar { background: transparent; border-bottom-color
 html[data-theme="glass"] footer { border-top-color: transparent; }
 html[data-theme="glass"] .icon-btn { color: var(--text-2); }
 html[data-theme="glass"] .icon-btn:hover { background: var(--tile); color: var(--text); }
-html[data-theme="glass"] .icon-btn[aria-expanded="false"] { color: var(--accent-text); }
 html[data-theme="glass"] .badge { background: var(--tile); color: var(--text-2); }
 
 /* Room around the panels, so soft shadows fade out instead of being cut off at the panel's edge */
 html[data-theme="glass"] main { padding: 0; gap: 0; }
 html[data-theme="glass"] .panel { padding: 8px 20px 44px; }
 html[data-theme="glass"] .controls { padding-left: 16px; padding-right: 16px; }
-html[data-theme="glass"] .devices { padding-right: 8px; }
-html[data-theme="glass"] body.devices-collapsed .devices { width: 0; padding: 0; margin-right: 0; }
 
 /* Surfaces: translucent with a soft top highlight */
 html[data-theme="glass"] .group {
   background: var(--gloss);
   box-shadow: var(--surface-edge), var(--shadow);
 }
-html[data-theme="glass"] #deviceList li:hover { background: var(--row-hover); }
 
 /* The one memorable thing: the top card with an iridescent edge, holding the level as light in a glass tube */
 html[data-theme="glass"] .hero.group {
