@@ -20,9 +20,7 @@ contextBridge.exposeInMainWorld('appMute', {
 });
 
 contextBridge.exposeInMainWorld('appInfo', {
-  version: () => ipcRenderer.invoke('app:version'),
-  setTheme: name => ipcRenderer.invoke('app:theme', String(name)),
-  onThemeChosen: cb => { ipcRenderer.on('app:theme-chosen', (event, name) => cb(String(name))); }
+  version: () => ipcRenderer.invoke('app:version')
 });
 
 contextBridge.exposeInMainWorld('appStartup', {

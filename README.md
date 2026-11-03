@@ -4,7 +4,7 @@ Microphone manager for Windows, inspired by SteelSeries Sonar's mic tab.
 
 **Run it:** `dist\MicManager\MicManager.exe` (keep it in its folder; closing hides it to the tray).
 
-The look can be switched between Glass, Dark and Classic in the app; see [DESIGN.md](DESIGN.md).
+The design notes are in [DESIGN.md](DESIGN.md).
 
 ## Folders
 ```
@@ -15,7 +15,7 @@ src/main/        Electron main process: window, tray, start-with-Windows, Window
   win-audio.cs     Windows Core Audio helper: list mics, set volume / mute; reports the ASUS mic key
   win-audio.ps1    runs that helper through PowerShell if win-audio.exe (built from it, not in git) is missing
 src/renderer/    the window
-  index.html, styles.css, theme-glass.css, renderer.js
+  index.html, styles.css, renderer.js
   gate-worklet.js  volume gate: used when the gate is set by hand, or as the fallback
   voice-worklet.js noise reduction (RNNoise) with a strength blend, and the gate that opens on detected voice
   vendor/          RNNoise compiled to WebAssembly (@jitsi/rnnoise-wasm 0.2.1, Apache-2.0, see its license file)
