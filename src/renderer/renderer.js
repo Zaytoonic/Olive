@@ -23,25 +23,6 @@ const ampToDb = a => (a <= 0 ? -Infinity : 20 * Math.log10(a));
 
 // ---- Device list ----
 function renderDevices() {
-  const list = $('deviceList');
-  list.innerHTML = '';
-  for (const d of devices) {
-    const li = document.createElement('li');
-    li.tabIndex = 0;
-    li.setAttribute('role', 'option');
-    li.setAttribute('aria-selected', d.id === state.deviceId);
-    if (d.id === state.deviceId) li.classList.add('selected');
-    li.innerHTML = `<span class="dev-name"></span><span class="dev-meta"></span>`;
-    li.querySelector('.dev-name').textContent = d.name;
-    const preferred = live && d === preferredDevice();
-    li.querySelector('.dev-meta').innerHTML = [d.driver, d.channels].filter(Boolean)
-      .concat(d.isDefault ? '<span class="dev-default">Windows default</span>' : [], preferred ? '<span class="dev-default">Preferred</span>' : [])
-      .join(' · ');
-    const pick = () => selectDevice(d.id);
-    li.addEventListener('click', pick);
-    li.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
-    list.appendChild(li);
-  }
   const pick = $('micSelect');
   pick.innerHTML = '';
   for (const d of devices) pick.add(new Option(d.name, d.id, false, d.id === state.deviceId));
@@ -1209,7 +1190,7 @@ async function pollSys() {
 // Restored on start: mic, volume (in-app), gate, mono, noise reduction, monitor level, EQ, send.
 // Not restored on purpose: Listen (could cause feedback at launch) and Mute (Windows keeps its own).
 const PREFS_KEY = 'micManager.settings.v1';
-let prefDeviceId = null, prefDeviceName = null, sendWanted = true, saveTimer = null, devicesCollapsed = false;
+let prefDeviceId = null, prefDeviceName = null, sendWanted = true, saveTimer = null;
 
 function loadPrefs() {
   let p = null;
@@ -1233,7 +1214,6 @@ function loadPrefs() {
   state.eqOpen = p.eqOpen === true;
   sendWanted = true;                             // Send to Discord is always on at launch;
   state.send = true;                             // loadDevices() connects the cable once devices are known
-  devicesCollapsed = p.devicesCollapsed === true;
   if (p.eqByMic && typeof p.eqByMic === 'object') Object.assign(eqByMic, p.eqByMic);
   const startEq = (prefDeviceName && eqByMic[prefDeviceName]) || p.eq;
   if (startEq && typeof startEq === 'object') restoreEq(startEq);
@@ -1263,7 +1243,6 @@ function showPrefsInUi() {
   $('compToggle').checked = state.comp; $('compAmount').disabled = !state.comp; $('compAmount').value = state.compAmount;
   $('sendToggle').checked = state.send;
   if (state.send) sendHint('Connecting…');
-  setDevicesCollapsed(devicesCollapsed);
   showEqPreset();
 }
 
@@ -1272,7 +1251,7 @@ function savePrefs() {
   const p = {
     deviceId: prefDeviceId, deviceName: prefDeviceName, volume: state.volume, gateDb: state.gateDb, gateAuto: state.gateAuto, mono: state.mono, tunedVoice: 1,
     nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol, send: sendWanted,
-    comp: state.comp, compAmount: state.compAmount, devicesCollapsed, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel, theme: state.theme, eqOpen: state.eqOpen,
+    comp: state.comp, compAmount: state.compAmount, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel, theme: state.theme, eqOpen: state.eqOpen,
     eq: snapshotEq(),
     eqByMic: eqOwner ? { ...eqByMic, [eqOwner]: snapshotEq() } : eqByMic
   };
@@ -1426,18 +1405,6 @@ function applyTheme(name) {
   if (window.appInfo) window.appInfo.setTheme(state.theme);
 }
 function chooseTheme(name) { applyTheme(name); savePrefs(); }
-
-// ---- Collapsible input devices panel ----
-function setDevicesCollapsed(c) {
-  devicesCollapsed = c;
-  document.body.classList.toggle('devices-collapsed', c);
-  const b = $('devToggle');
-  b.setAttribute('aria-expanded', String(!c));
-  b.title = c ? 'Show input devices' : 'Hide input devices';
-  $('devicesPanel').setAttribute('aria-hidden', String(c));
-  $('devicesPanel').inert = c;                    // no tabbing into the hidden list
-}
-$('devToggle').addEventListener('click', () => { setDevicesCollapsed(!devicesCollapsed); savePrefs(); });
 
 // ---- Init ----
 applyTunedOnce(loadPrefs());

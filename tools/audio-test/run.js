@@ -288,7 +288,7 @@ const pageEqStretch = async () => {
     samples++;
     await new Promise(r => setTimeout(r, 16));
   }
-  return { worst, samples, hidden: windowHidden, collapsed: devicesCollapsed, css: c.clientWidth, bitmap: c.width };
+  return { worst, samples, hidden: windowHidden, css: c.clientWidth, bitmap: c.width };
 };
 
 // ---- Gate analysis: every 20 ms frame is matched to its known position in the fixture ----
@@ -390,6 +390,15 @@ async function liveChecks(profile, wav, fixture) {
         delete navigator.mediaDevices.enumerateDevices;
         await loadDevices(); await wait(800);
         out.replugged = { current: currentDevice().name, notice: $('micNotice').textContent, bass: eq.b.bass.g, capturing: capturedId === state.deviceId };
+        const pickBox = $('micSelect').getBoundingClientRect(), refreshBox = $('refreshBtn').getBoundingClientRect(), optionsBefore = $('micSelect').options.length;
+        out.refreshBeside = refreshBox.width > 0 && refreshBox.left >= pickBox.right - 1 && Math.abs((refreshBox.top + refreshBox.bottom) - (pickBox.top + pickBox.bottom)) / 2 < 8;
+        out.panelGone = !$('devicesPanel') && !$('deviceList') && !$('devToggle');
+        navigator.mediaDevices.enumerateDevices = async () => (await realList()).filter(d => d.deviceId !== state.deviceId);
+        $('refreshBtn').click(); await wait(800);
+        out.refreshRemoved = $('micSelect').options.length === optionsBefore - 1;
+        delete navigator.mediaDevices.enumerateDevices;
+        $('refreshBtn').click(); await wait(800);
+        out.refreshRestored = $('micSelect').options.length === optionsBefore;
         const saved = JSON.parse((savePrefs(), localStorage.getItem(PREFS_KEY)));
         out.savedPerMic = [saved.eqByMic[a.name] && saved.eqByMic[a.name].bands.bass.g, saved.eqByMic[b.name] && saved.eqByMic[b.name].bands.bass.g];
         selectDevice(a.id); await wait(300);
@@ -398,6 +407,7 @@ async function liveChecks(profile, wav, fixture) {
       });
       check('the picker lists mics and switches', mic.options === mic.names.length && mic.picked, `${mic.options} mics listed, picked: ${mic.picked}`);
       check('each mic keeps its own EQ', mic.firstTimeInherits && mic.bBass === 5 && mic.aBass === -4 && mic.savedPerMic[0] === -4 && mic.savedPerMic[1] === 5, `bass ${mic.bBass} on one, ${mic.aBass} on the other; saved ${mic.savedPerMic.join(' / ')}`);
+      check('the refresh button sits beside the dropdown and updates the list', mic.refreshBeside && mic.panelGone && mic.refreshRemoved && mic.refreshRestored, `beside: ${mic.refreshBeside}, side panel gone: ${mic.panelGone}, list updated: ${mic.refreshRemoved} / ${mic.refreshRestored}`);
       check('a rescan does not restart a healthy capture', mic.rescanKeepsCapture, `capture kept: ${mic.rescanKeepsCapture}`);
       check('unplugged: falls back and says so', mic.unplugged.current === mic.names[0] && mic.unplugged.notice.includes(mic.names[1]) && mic.unplugged.bass === -4 && mic.unplugged.stillPreferred === mic.names[1], `using ${mic.unplugged.current}, "${mic.unplugged.notice}"`);
       check('plugged back in: returns to the preferred mic', mic.replugged.current === mic.names[1] && !mic.replugged.notice && mic.replugged.bass === 5 && mic.replugged.capturing, `using ${mic.replugged.current}, EQ bass ${mic.replugged.bass}`);
@@ -590,7 +600,7 @@ async function liveChecks(profile, wav, fixture) {
 
     if (!wanted('eq')) return;
     console.log('\nEQ graph');
-    await copy.call(() => { setEqOpen(true); if (!devicesCollapsed) $('devToggle').click(); savePrefs(); });
+    await copy.call(() => { setEqOpen(true); savePrefs(); });
     // Chromium writes saved settings to disk in its own time, later after a burst of saves. Wait until they're really there.
     const savedOnDisk = () => {
       const dirPath = path.join(profile, 'Local Storage', 'leveldb');
@@ -598,7 +608,7 @@ async function liveChecks(profile, wav, fixture) {
         const raw = fs.readdirSync(dirPath).filter(f => f.endsWith('.log')).map(f => fs.readFileSync(path.join(dirPath, f)).toString('latin1')).join('');
         const at = raw.lastIndexOf('micManager.settings.v1');
         const saved = raw.slice(at, at + 900);
-        return at >= 0 && saved.includes('"devicesCollapsed":true') && saved.includes('"eqOpen":true');
+        return at >= 0 && saved.includes('"eqOpen":true');
       } catch { return false; }
     };
     for (let i = 0; i < 180 && !savedOnDisk(); i++) await sleep(500);
@@ -608,11 +618,11 @@ async function liveChecks(profile, wav, fixture) {
     await copy.call(pageReady);
     await sleep(1500);
     const hiddenEq = await copy.call(pageEqStretch);
-    check('graph is not stretched while hidden', hiddenEq.collapsed && Math.abs(hiddenEq.worst - 1) < 0.01, `worst ${hiddenEq.worst.toFixed(2)}x (${hiddenEq.css} px layout, ${hiddenEq.bitmap} px bitmap, panel collapsed: ${hiddenEq.collapsed})`);
+    check('graph is not stretched while hidden', Math.abs(hiddenEq.worst - 1) < 0.01, `worst ${hiddenEq.worst.toFixed(2)}x (${hiddenEq.css} px layout, ${hiddenEq.bitmap} px bitmap)`);
     spawn(copy.exe, copy.args.filter(a => a !== '--hidden'), { cwd: ROOT, stdio: 'ignore' });   // a second launch shows the window
     await sleep(500);
     const eq = await copy.call(pageEqStretch);
-    check('graph is not stretched after a hidden start', eq.collapsed && Math.abs(eq.worst - 1) < 0.01, `worst ${eq.worst.toFixed(2)}x over ${eq.samples} samples (${eq.css} px layout, ${eq.bitmap} px bitmap, panel collapsed: ${eq.collapsed})`);
+    check('graph is not stretched after a hidden start', Math.abs(eq.worst - 1) < 0.01, `worst ${eq.worst.toFixed(2)}x over ${eq.samples} samples (${eq.css} px layout, ${eq.bitmap} px bitmap)`);
   } finally {
     copy.stop();
   }

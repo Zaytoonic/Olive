@@ -9,32 +9,24 @@
 </head>
 <body>
   <header class="toolbar">
-    <button id="devToggle" class="icon-btn" aria-expanded="true" aria-controls="devicesPanel" title="Hide input devices">
-      <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><line x1="7.5" y1="3.5" x2="7.5" y2="16.5"/></svg>
-    </button>
     <h1>Mic Manager</h1>
     <span id="sourceBadge" class="badge">Mock audio</span>
   </header>
 
   <main>
-    <aside class="panel devices" id="devicesPanel">
-      <div class="section-head">
-        <h2>Input devices</h2>
-        <button id="refreshBtn" class="icon-btn small" title="Rescan devices" aria-label="Rescan devices">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 10a6 6 0 1 1-1.8-4.3"/><polyline points="16.5 3.5 16.5 6.5 13.5 6.5"/></svg>
-        </button>
-      </div>
-      <div id="devStatus" class="hint"></div>
-      <ul id="deviceList" class="group list"></ul>
-    </aside>
-
     <section class="panel controls">
       <div class="hero group">
         <div class="current">
           <div class="current-text">
             <label for="micSelect" class="caption">Selected microphone</label>
-            <select id="micSelect" class="current-name" title="Choose a microphone"></select>
+            <div class="mic-pick">
+              <select id="micSelect" class="current-name" title="Choose a microphone"></select>
+              <button id="refreshBtn" type="button" class="icon-btn small" title="Refresh the microphone list" aria-label="Refresh the microphone list">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 10a6 6 0 1 1-1.8-4.3"/><polyline points="16.5 3.5 16.5 6.5 13.5 6.5"/></svg>
+              </button>
+            </div>
             <div id="micNotice" class="hint notice"></div>
+            <div id="devStatus" class="hint"></div>
           </div>
           <div class="current-actions">
             <button id="listenBtn" class="pill listen" aria-pressed="false" title="Hear your mic live (use headphones)">Listen</button>
