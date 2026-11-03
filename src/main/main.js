@@ -32,6 +32,7 @@ function serveWorklet(request) {
     .catch(() => new Response('Not found', { status: 404 }));
 }
 const { HelperClient } = require('./sysmic-client');
+const { OLD_SETTINGS_FOLDER, migrateSettings, moveLoginEntry } = require('./migrate');
 
 // ---- Windows microphone control (volume + mute) via the win-audio helper ----
 const HELPER_EXE = path.join(__dirname, 'win-audio.exe');
@@ -74,11 +75,18 @@ function upgradeLoginItem() {                 // an entry saved by an older vers
   const old = { path: process.execPath, args: [HIDDEN_ARG] };
   if (app.getLoginItemSettings(old).openAtLogin && !app.getLoginItemSettings(loginItemOpts()).openAtLogin) app.setLoginItemSettings({ openAtLogin: true, ...loginItemOpts() });
 }
+function moveOldLoginItem() {                 // the entry from when this app was called Mic Manager
+  if (!canRegisterAtLogin()) return;
+  moveLoginEntry(enabled => {
+    app.setLoginItemSettings({ openAtLogin: true, enabled, ...loginItemOpts() });
+    return !!app.getLoginItemSettings(loginItemOpts()).openAtLogin;
+  });
+}
 // Only the built app may register itself. From source (npm start) process.execPath is the bare electron.exe, which
 // at login has no app to load and opens Electron's "run this command" welcome window.
 ipcMain.handle('startup:get', () => {
   if (process.platform !== 'win32') return { supported: false, enabled: false };
-  if (!canRegisterAtLogin()) return { supported: false, enabled: false, reason: app.isPackaged ? 'Not in a trial copy' : 'Only in the built app (MicManager.exe)' };
+  if (!canRegisterAtLogin()) return { supported: false, enabled: false, reason: app.isPackaged ? 'Not in a trial copy' : 'Only in the built app (Olive.exe)' };
   return { supported: true, enabled: !!app.getLoginItemSettings(loginItemOpts()).openAtLogin };
 });
 ipcMain.handle('startup:set', (event, on) => {
@@ -107,9 +115,9 @@ function createWindow() {
   const area = screen.getPrimaryDisplay().workAreaSize;   // smaller screens get a window that still fits
   win = new BrowserWindow({
     width: Math.min(1120, area.width), height: Math.min(780, area.height), minWidth: 760, minHeight: 560,
-    backgroundColor: '#0f1115', title: 'Mic Manager', autoHideMenuBar: true,
+    backgroundColor: '#000000', title: 'Olive', autoHideMenuBar: true,
     show: false,                               // shown on ready-to-show, unless started hidden at login
-    icon: path.join(ASSETS, 'icon.png'),
+    icon: path.join(ASSETS, 'icon.ico'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, autoplayPolicy: 'no-user-gesture-required', backgroundThrottling: false, spellcheck: false }
   });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -132,7 +140,7 @@ function createWindow() {
       trayHintShown = true;
       tray.displayBalloon({
         iconType: 'info',
-        title: 'Mic Manager is still running',
+        title: 'Olive is still running',
         content: 'It keeps working in the background. Click the tray icon to open it, or right-click it and choose Quit.'
       });
     }
@@ -174,9 +182,9 @@ function updateTaskbarBadge() {
 function updateTray() {
   if (!tray) return;
   tray.setImage(nativeImage.createFromPath(path.join(ASSETS, muted ? 'tray-icon-muted.png' : 'tray-icon.png')));
-  tray.setToolTip(muted ? 'Mic Manager: muted' : 'Mic Manager');
+  tray.setToolTip(muted ? 'Olive: muted' : 'Olive');
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open Mic Manager', click: showWindow },
+    { label: 'Open Olive', click: showWindow },
     { label: 'Mute microphone', type: 'checkbox', checked: muted, click: requestMuteToggle },
     { type: 'separator' },
     { label: 'Quit', click: quitApp }
@@ -193,9 +201,13 @@ function createTray() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();                                  // already running: the other copy shows its window
 } else {
+  // Holding the lock means no other copy is using this folder. A test copy's folder has no old folder beside it, so it starts clean.
+  const settingsDir = app.getPath('userData');
+  migrateSettings(path.join(path.dirname(settingsDir), OLD_SETTINGS_FOLDER), settingsDir);
   app.on('second-instance', showWindow);
 
   app.whenReady().then(() => {
+    moveOldLoginItem();
     upgradeLoginItem();
     protocol.handle('app', serveWorklet);
     // Allow microphone access for the app's own page only (no camera, no other permissions).
