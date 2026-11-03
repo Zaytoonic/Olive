@@ -70,7 +70,15 @@ function bindControls() {
   $('compToggle').addEventListener('change', e => { state.comp = e.target.checked; $('compAmount').disabled = !state.comp; applyComp(); updateHints(); });
   $('compAmount').addEventListener('input', e => { state.compAmount = +e.target.value; applyComp(); updateHints(); });
 }
-function toggleMute() { setAllMuted(!state.muted); }
+function toggleMute() { const m = !state.muted; setAllMuted(m); playMuteSound(m); }
+// Only for a mute you asked for, not when syncing with Windows. Plays on your speakers only: it isn't part of the mic chain, so Discord never hears it.
+const muteSound = new Audio('../../assets/mute-sound.mp3');
+muteSound.preload = 'auto';
+function playMuteSound(muting) {
+  muteSound.pause();
+  muteSound.currentTime = 0;
+  if (muting) muteSound.play().catch(() => {});
+}
 // Mute means everything agrees: the app, the selected mic, and the Windows recording devices Discord could listen to
 // (the virtual cable and the default device). Otherwise unmuting here could leave the cable muted, and Discord silent.
 function setAllMuted(m) {
@@ -1272,7 +1280,9 @@ async function settleMicKey() {
   if (sysApi && live && sysStatus === 'ready') {
     try { const list = await sysApi.list(); list.forEach(e => storeSys(e)); sysEndpoints.forEach(e => { const n = list.find(x => x.id === e.id); if (n) e.isDefault = n.isDefault; }); def = list.find(e => e.isDefault); } catch { /* use what we know */ }
   }
-  setAllMuted(micKeyResult(before, presses, def ? def.muted : null));
+  const m = micKeyResult(before, presses, def ? def.muted : null);
+  setAllMuted(m);
+  if (m !== before) playMuteSound(m);
 }
 
 // ---- Mute hotkey and tray ----

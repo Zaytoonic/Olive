@@ -516,6 +516,18 @@ async function liveChecks(profile, wav, fixture) {
       await sleep(300);
       const off = await copy.call(pageOutPeak, 14);
       check('muting silences the output', off < -90, `output peak ${f1(off)} dB`);
+      const sound = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), out = { duration: muteSound.duration };
+        toggleMute(); await wait(100);
+        out.quietOnUnmute = muteSound.paused;
+        toggleMute(); await wait(300);
+        out.playedOnMute = !muteSound.paused && muteSound.currentTime > 0;
+        toggleMute(); await wait(100);
+        out.stoppedOnUnmute = muteSound.paused && muteSound.currentTime === 0;
+        toggleMute();
+        return out;
+      });
+      check('the mute sound plays on mute and stops on unmute', sound.duration > 0.5 && sound.duration < 1.5 && sound.quietOnUnmute && sound.playedOnMute && sound.stoppedOnUnmute, `${f1(sound.duration)} s long, played: ${sound.playedOnMute}, silent on unmute: ${sound.quietOnUnmute && sound.stoppedOnUnmute}`);
       await copy.call(() => toggleMute());
       const hotkey = await copy.call(() => $('muteKeyHint').textContent);
       if (/in use/.test(hotkey)) {
