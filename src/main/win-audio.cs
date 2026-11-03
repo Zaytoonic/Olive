@@ -1,4 +1,4 @@
-// Mic Manager helper: controls Windows microphone (capture) endpoints via Core Audio.
+// Olive helper: controls Windows microphone (capture) endpoints via Core Audio.
 // Protocol: one request per stdin line "id<TAB>cmd<TAB>args...", one JSON reply per stdout line.
 // Commands: list | get <endpointId> | setvol <endpointId> <0..1> | setmute <endpointId> <0|1>
 // Also prints {"event":"mic-key"} when an ASUS laptop's dedicated mic key is pressed.
@@ -10,7 +10,7 @@ using System.Management;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace MicManager
+namespace Olive
 {
     [StructLayout(LayoutKind.Sequential)]
     public struct PropertyKey { public Guid fmtid; public int pid; }

@@ -1,4 +1,4 @@
-// Mic Manager: real input devices, live metering + monitoring, mock fallback. Microphones only.
+// Olive: real input devices, live metering + monitoring, mock fallback. Microphones only.
 
 const MOCK_DEVICES = [
   { id: 'mic-1', name: 'USB Condenser Microphone', driver: 'USB Audio', channels: 'Mono · 48 kHz', isDefault: true, noise: 0.012, voice: 0.55 },
@@ -367,7 +367,7 @@ const EQ_PRESETS = {
   broadcast: { bass: 4,  lowmid: -1, mid: -2, presence: 3, brilliance: 1, air: 2, lowCut: true },
   boom:      { bass: -6, lowmid: -3, mid: 0,  presence: 1, brilliance: 0, air: 0, lowCut: true }
 };
-const GRAPH_COLORS = { gridZero: '#48484a', grid: '#2c2c2e', vertical: '#232325', label: '#98989d', fill: 'rgba(0,102,204,0.16)', ring: '#fff' };
+const GRAPH_COLORS = { gridZero: '#4a4944', grid: '#2e2d29', vertical: '#252421', label: '#9c9a91', fill: 'rgba(107,127,58,0.22)', ring: '#fff' };
 const eq = { on: true, lowCut: false, b: {} };          // b[key] = { f: Hz, g: dB, q }
 const bandDef = key => EQ_BANDS.find(d => d.key === key);
 function resetBand(key) { const d = bandDef(key); eq.b[key] = { f: d.freq, g: 0, q: d.q }; }
@@ -612,7 +612,7 @@ function drawEqCurve() {
   }
   path(total); ctx.lineTo(x1, y0); ctx.lineTo(x0, y0); ctx.closePath();
   ctx.fillStyle = colors.fill; ctx.fill();
-  path(total); ctx.strokeStyle = '#2997ff'; ctx.lineWidth = 2; ctx.stroke();
+  path(total); ctx.strokeStyle = '#9AAF5E'; ctx.lineWidth = 2; ctx.stroke();
 
   // points
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = "600 11px system-ui, 'Segoe UI', sans-serif";
@@ -1183,12 +1183,19 @@ async function pollSys() {
 // ---- Saved settings ----
 // Restored on start: mic, volume (in-app), gate, mono, noise reduction, monitor level, EQ, send.
 // Not restored on purpose: Listen (could cause feedback at launch) and Mute (Windows keeps its own).
-const PREFS_KEY = 'micManager.settings.v1';
+const PREFS_KEY = 'olive.settings.v1', OLD_PREFS_KEY = 'micManager.settings.v1';   // the old name, from before the rebrand
 let prefDeviceId = null, prefDeviceName = null, sendWanted = true, saveTimer = null;
 
 function loadPrefs() {
   let p = null;
-  try { p = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null'); } catch { p = null; }
+  try {
+    const old = localStorage.getItem(OLD_PREFS_KEY);
+    if (old !== null) {
+      if (localStorage.getItem(PREFS_KEY) === null) localStorage.setItem(PREFS_KEY, old);
+      localStorage.removeItem(OLD_PREFS_KEY);
+    }
+    p = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null');
+  } catch { p = null; }
   if (!p || typeof p !== 'object') return null;
   const num = (v, lo, hi, d) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
   if (typeof p.deviceId === 'string') { prefDeviceId = p.deviceId; state.deviceId = p.deviceId; }
@@ -1400,5 +1407,5 @@ loadDevices();
 setInterval(pollSys, 2000);
 window.addEventListener('focus', pollSys);
 $('refreshBtn').addEventListener('click', loadDevices);
-if (window.appInfo) window.appInfo.version().then(v => { $('appFooter').textContent = 'Mic Manager ' + v.replace(/\.0$/, ''); }).catch(() => {});
+if (window.appInfo) window.appInfo.version().then(v => { $('appFooter').textContent = 'Olive ' + v.replace(/\.0$/, ''); }).catch(() => {});
 navigator.mediaDevices.addEventListener('devicechange', () => { clearTimeout(window._dc); window._dc = setTimeout(loadDevices, 400); });

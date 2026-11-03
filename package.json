@@ -1,13 +1,14 @@
 {
-  "name": "mic-manager",
+  "name": "olive",
   "version": "1.5.0",
-  "description": "Microphone manager for Windows: Windows mic volume/mute, noise gate, noise reduction, EQ, compressor, send to Discord",
+  "description": "Olive: microphone manager for Windows. Windows mic volume/mute, noise gate, noise reduction, EQ, compressor, send to Discord",
   "main": "src/main/main.js",
   "scripts": {
     "prestart": "node tools/build-helper.js",
     "start": "electron .",
     "build": "node tools/build.js",
     "patch-exe": "node tools/patch-exe.js",
+    "make-icons": "node tools/make-icons.js",
     "test:audio": "node tools/audio-test/run.js",
     "update-runtime": "node tools/update-runtime.js"
   },

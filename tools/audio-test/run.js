@@ -2,6 +2,7 @@
 //
 // Runs a separate hidden, muted copy of the app with its own temporary settings folder and a fake microphone
 // that plays a generated file. Your running app, your settings, your mic and the virtual cable are not touched.
+// The rename check adds a fake login entry to Windows for a moment, then removes it.
 // During the EQ check its window opens briefly; a tray icon shows while it runs. Takes about 3 minutes.
 // Exit code 1 if any check fails. To run one part: npm run test:audio -- nr | gate | mute | eq | app
 const fs = require('fs');
@@ -416,10 +417,12 @@ async function liveChecks(profile, wav, fixture) {
         savePrefs();
         return {
           picker: !!document.getElementById('themeSelect'), attr: document.documentElement.dataset.theme || null, text: getComputedStyle(document.body).color,
+          accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(), names: [document.title, document.querySelector('h1').textContent, $('appFooter').textContent.split(' ')[0]],
           sheets: [...document.styleSheets].map(s => s.href.split('/').pop()), saved: 'theme' in JSON.parse(localStorage.getItem(PREFS_KEY))
         };
       });
-      check('Classic is the only look, with no picker', !look.picker && !look.attr && !look.saved && look.text === 'rgb(245, 245, 247)' && look.sheets.join() === 'styles.css', `picker: ${look.picker}, stylesheets: ${look.sheets.join()}, text: ${look.text}`);
+      check('Classic is the only look, with no picker', !look.picker && !look.attr && !look.saved && look.text === 'rgb(245, 244, 240)' && look.sheets.join() === 'styles.css', `picker: ${look.picker}, stylesheets: ${look.sheets.join()}, text: ${look.text}`);
+      check('the window is branded Olive', look.accent === '#6B7F3A' && look.names.every(n => n === 'Olive'), `accent ${look.accent}, title / heading / footer: ${look.names.join(' / ')}`);
       console.log('\nEQ dropdown and scrolling');
       const eqUi = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), out = { startsClosed: $('eqBody').hidden && state.eqOpen === false && $('eqExpand').getAttribute('aria-expanded') === 'false' };
@@ -531,7 +534,7 @@ async function liveChecks(profile, wav, fixture) {
       await copy.call(() => toggleMute());
       const hotkey = await copy.call(() => $('muteKeyHint').textContent);
       if (/in use/.test(hotkey)) {
-        console.log('  SKIP  hotkey press: another Mic Manager or app holds Ctrl+Alt+M');
+        console.log('  SKIP  hotkey press: another Olive or app holds Ctrl+Alt+M');
       } else {
         const states = [await copy.call(() => state.muted)];
         for (let i = 0; i < 2; i++) { pressHotkey(); await sleep(600); states.push(await copy.call(() => state.muted)); }
@@ -588,7 +591,7 @@ async function liveChecks(profile, wav, fixture) {
       const dirPath = path.join(profile, 'Local Storage', 'leveldb');
       try {
         const raw = fs.readdirSync(dirPath).filter(f => f.endsWith('.log')).map(f => fs.readFileSync(path.join(dirPath, f)).toString('latin1')).join('');
-        const at = raw.lastIndexOf('micManager.settings.v1');
+        const at = raw.lastIndexOf('olive.settings.v1');
         const saved = raw.slice(at, at + 900);
         return at >= 0 && saved.includes('"eqOpen":true');
       } catch { return false; }
@@ -610,8 +613,71 @@ async function liveChecks(profile, wav, fixture) {
   }
 }
 
+// ---- From the old name: real saved settings in an old folder, opened by a real copy of the app under the new one ----
+async function renameChecks(dir, wav) {
+  console.log('\nMoving from the old name');
+  const { migrateSettings, moveLoginEntry, reg, RUN, APPROVED } = require(path.join(ROOT, 'src', 'main', 'migrate.js'));
+  const root = path.join(dir, 'appdata'), oldDir = path.join(root, 'mic-manager'), newDir = path.join(root, 'olive');
+  fs.mkdirSync(root);
+  check('nothing to move on a fresh install', migrateSettings(oldDir, path.join(dir, 'fresh')) === 'none', 'no old folder, nothing copied');
+
+  let copy = new Copy(oldDir, wav, ['--hidden']);
+  try {
+    await copy.connect();
+    await copy.call(pageReady);
+    await copy.call(() => {
+      state.compAmount = 37; eq.b.bass.g = -7; state.eqOpen = true;
+      savePrefs();
+      localStorage.setItem(OLD_PREFS_KEY, localStorage.getItem(PREFS_KEY));
+      localStorage.removeItem(PREFS_KEY);
+    });
+    const onDisk = () => {
+      try {
+        const folder = path.join(oldDir, 'Local Storage', 'leveldb');
+        return fs.readdirSync(folder).filter(f => f.endsWith('.log')).some(f => fs.readFileSync(path.join(folder, f)).toString('latin1').includes('micManager.settings.v1'));
+      } catch { return false; }
+    };
+    for (let i = 0; i < 180 && !onDisk(); i++) await sleep(500);
+  } finally { copy.stop(); }
+  await sleep(2000);
+  // The copy is killed before Chromium writes this file, so give it a salt, shaped like the real one, to carry across.
+  const SALT = '19A7FB1A00000000D43CE60F00000000';
+  fs.writeFileSync(path.join(oldDir, 'Preferences'), JSON.stringify({ electron: { media: { device_id_salt: SALT } } }));
+
+  copy = new Copy(newDir, wav, ['--hidden']);                 // the app itself finds the old folder beside its own and copies from it
+  try {
+    await copy.connect();
+    await copy.call(pageReady);
+    const got = await copy.call(() => ({ comp: state.compAmount, bass: eq.b.bass.g, eqOpen: state.eqOpen, oldKey: localStorage.getItem(OLD_PREFS_KEY) !== null, newKey: localStorage.getItem(PREFS_KEY) !== null }));
+    check('settings and EQ come across', got.comp === 37 && got.bass === -7 && got.eqOpen === true, `compressor ${got.comp}, bass ${got.bass}, EQ open ${got.eqOpen}`);
+    check('they move to the new settings name', got.newKey && !got.oldKey, `new: ${got.newKey}, old: ${got.oldKey}`);
+    const salt = d => { try { return JSON.parse(fs.readFileSync(path.join(d, 'Preferences'), 'utf8')).electron.media.device_id_salt; } catch { return null; } };
+    check('saved mic IDs stay valid', salt(newDir) === SALT, `salt came across: ${salt(newDir) === SALT}`);
+  } finally { copy.stop(); }
+  await sleep(2000);
+  check('the old folder is left alone', fs.existsSync(path.join(oldDir, 'Local Storage')), 'still there');
+  check('existing settings are never overwritten', migrateSettings(oldDir, newDir) === 'exists', 'second run copies nothing');
+
+  // The login entry, using a fake name and a path that doesn't exist, so the real entry is never touched.
+  const fake = 'Olive test entry (safe to delete)';
+  const exists = key => reg('query', key, '/v', fake) !== null;
+  try {
+    reg('add', RUN, '/v', fake, '/t', 'REG_SZ', '/d', '"C:\\does-not-exist.exe" --hidden', '/f');
+    reg('add', APPROVED, '/v', fake, '/t', 'REG_BINARY', '/d', '030000000000000000000000', '/f');
+    const refused = moveLoginEntry(() => false, fake);
+    check('the old login entry stays if the new one fails', refused === 'failed' && exists(RUN), `${refused}, old entry there: ${exists(RUN)}`);
+    let asked = null;
+    const moved = moveLoginEntry(enabled => { asked = enabled; return true; }, fake);
+    check('the login entry moves, and stays off if it was off', moved === 'moved-off' && asked === false && !exists(RUN) && !exists(APPROVED), `${moved}, old entry there: ${exists(RUN) || exists(APPROVED)}`);
+    check('no old login entry: nothing happens', moveLoginEntry(() => { throw new Error('should not run'); }, fake) === 'none', 'none');
+  } finally {
+    reg('delete', RUN, '/v', fake, '/f');
+    reg('delete', APPROVED, '/v', fake, '/f');
+  }
+}
+
 (async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mic-manager-audio-test-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'olive-audio-test-'));
   const fixture = makeFixture();
   const wav = path.join(dir, 'fixture.wav');
   writeWav(wav, fixture.samples);
@@ -621,6 +687,7 @@ async function liveChecks(profile, wav, fixture) {
     if (wanted('nr')) { voiceChecks(); offlineChecks(); }
     if (wanted('gate')) gateChecks(fixture);
     await liveChecks(path.join(dir, 'profile'), wav, fixture);
+    if (wanted('app')) await renameChecks(dir, wav);
   } catch (err) {
     check('test run finished', false, err.message);
   }
