@@ -412,44 +412,14 @@ async function liveChecks(profile, wav, fixture) {
       check('unplugged: falls back and says so', mic.unplugged.current === mic.names[0] && mic.unplugged.notice.includes(mic.names[1]) && mic.unplugged.bass === -4 && mic.unplugged.stillPreferred === mic.names[1], `using ${mic.unplugged.current}, "${mic.unplugged.notice}"`);
       check('plugged back in: returns to the preferred mic', mic.replugged.current === mic.names[1] && !mic.replugged.notice && mic.replugged.bass === 5 && mic.replugged.capturing, `using ${mic.replugged.current}, EQ bass ${mic.replugged.bass}`);
       console.log('\nAppearance');
-      const look = await copy.call(async () => {
-        const wait = ms => new Promise(r => setTimeout(r, ms)), out = {};
-        const css = () => ({ attr: document.documentElement.dataset.theme || null, mode: document.documentElement.dataset.mode || null, bg: getComputedStyle(document.body).backgroundColor, text: getComputedStyle(document.body).color });
-        const before = { bass: eq.b.bass.g, nr: state.nrAmount, gate: state.gateAuto, comp: state.comp };
-        out.first = css(); out.firstTheme = state.theme;
-        $('themeSelect').value = 'classic'; $('themeSelect').dispatchEvent(new Event('change', { bubbles: true })); await wait(200);
-        out.classic = css(); out.savedClassic = JSON.parse(localStorage.getItem(PREFS_KEY)).theme;
-        $('themeSelect').value = 'glass'; $('themeSelect').dispatchEvent(new Event('change', { bubbles: true })); await wait(200);
-        out.glass = css(); out.savedGlass = JSON.parse(localStorage.getItem(PREFS_KEY)).theme;
-        $('themeSelect').value = 'dark'; $('themeSelect').dispatchEvent(new Event('change', { bubbles: true })); await wait(200);
-        out.dark = css(); out.savedDark = JSON.parse(localStorage.getItem(PREFS_KEY)).theme;
-        chooseTheme('glass');
-        out.backToLight = css();
-        out.sameSettings = before.bass === eq.b.bass.g && before.nr === state.nrAmount && before.gate === state.gateAuto && before.comp === state.comp;
-        return out;
+      const look = await copy.call(() => {
+        savePrefs();
+        return {
+          picker: !!document.getElementById('themeSelect'), attr: document.documentElement.dataset.theme || null, text: getComputedStyle(document.body).color,
+          sheets: [...document.styleSheets].map(s => s.href.split('/').pop()), saved: 'theme' in JSON.parse(localStorage.getItem(PREFS_KEY))
+        };
       });
-      check('Glass is the default; Classic switches instantly and is remembered', look.firstTheme === 'glass' && look.first.attr === 'glass' && look.classic.attr === null && look.classic.text === 'rgb(245, 245, 247)' && look.savedClassic === 'classic' && look.glass.attr === 'glass' && look.savedGlass === 'glass', `classic text ${look.classic.text}, glass text ${look.glass.text}, saved ${look.savedClassic} then ${look.savedGlass}`);
-      check('Dark mode switches in and out cleanly', look.dark.attr === 'glass' && look.dark.mode === 'dark' && look.dark.text === 'rgb(243, 242, 255)' && look.savedDark === 'dark' && look.backToLight.mode === null && look.backToLight.text === 'rgb(38, 37, 74)', `dark text ${look.dark.text}, saved ${look.savedDark}, back to light: ${look.backToLight.text}`);
-      check('switching looks changes no settings', look.sameSettings, `settings unchanged: ${look.sameSettings}`);
-      // Text in the Glass look against the darkest background it can sit on (each translucent surface over the deepest pastel).
-      for (const look of ['glass', 'dark']) {
-      const contrast = await copy.call(look => {
-        applyTheme(look);
-        const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
-        const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-        const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-        const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
-        const rgb = el => getComputedStyle(el).color.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number);
-        // Glass text is dark, so its hardest backgrounds are its deepest pastels; Dark mode's text is light, so its lightest surfaces.
-        const deepest = look === 'dark' ? hex('#3b2150') : hex('#e6ddfc'), onSurface = look === 'dark' ? deepest.map(v => v + (255 - v) * 0.12) : deepest.map(v => v + (255 - v) * 0.5);
-        const rows = [['text', document.querySelector('.row-title'), onSurface], ['hints', document.querySelector('.hint'), onSurface], ['values', $('volumeVal'), onSurface], ['section titles', document.querySelector('.group-title'), deepest], ['footer', $('appFooter'), deepest], ['captions', document.querySelector('.caption'), onSurface], ['muted banner', $('mutedBanner'), look === 'dark' ? hex('#5a3556') : hex('#f2c9d8')], ['mic notice', $('micNotice'), onSurface]];
-        const out = rows.map(([name, el, bg]) => ({ name, r: ratio(rgb(el), bg) }));
-        for (const [name, top] of [['Muted button', '#cf3a73'], ['Listening button', '#6f60e6']]) out.push({ name, r: ratio([255, 255, 255], hex(top)) });
-        applyTheme('glass');
-        return out;
-      }, look);
-      check(`${look === 'dark' ? 'Dark' : 'Glass'} text is readable (at least 4.5:1)`, contrast.every(c => c.r >= 4.5), contrast.map(c => `${c.name} ${c.r.toFixed(1)}`).join(', '));
-      }
+      check('Classic is the only look, with no picker', !look.picker && !look.attr && !look.saved && look.text === 'rgb(245, 245, 247)' && look.sheets.join() === 'styles.css', `picker: ${look.picker}, stylesheets: ${look.sheets.join()}, text: ${look.text}`);
       console.log('\nEQ dropdown and scrolling');
       const eqUi = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), out = { startsClosed: $('eqBody').hidden && state.eqOpen === false && $('eqExpand').getAttribute('aria-expanded') === 'false' };

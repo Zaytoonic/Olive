@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, nativeTheme, protocol, globalShortcut, screen } = require('electron');
+const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, protocol, globalShortcut, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -163,21 +163,6 @@ ipcMain.handle('mute:hotkey', (event, accelerator) => {
   return ok;
 });
 ipcMain.handle('app:version', () => app.getVersion());
-// The page owns the look. This keeps the window's backing colour, title bar and the tray menu in step with it.
-let theme = 'glass';
-const THEMES = {
-  glass: { background: '#eeebfc', titleBar: 'light' },
-  dark: { background: '#17162f', titleBar: 'dark' },
-  classic: { background: '#0f1115', titleBar: 'system' }
-};
-ipcMain.handle('app:theme', (event, name) => {
-  if (!THEMES[name]) return;
-  theme = name;
-  nativeTheme.themeSource = THEMES[theme].titleBar;
-  if (win && !win.isDestroyed()) win.setBackgroundColor(THEMES[theme].background);
-  updateTray();
-});
-const chooseTheme = name => { if (win && !win.isDestroyed()) win.webContents.send('app:theme-chosen', name); };
 
 // A red slashed-mic badge on the taskbar button while muted, when the window is open.
 function updateTaskbarBadge() {
@@ -193,11 +178,6 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Mic Manager', click: showWindow },
     { label: 'Mute microphone', type: 'checkbox', checked: muted, click: requestMuteToggle },
-    { label: 'Appearance', submenu: [
-      { label: 'Glass', type: 'radio', checked: theme === 'glass', click: () => chooseTheme('glass') },
-      { label: 'Dark', type: 'radio', checked: theme === 'dark', click: () => chooseTheme('dark') },
-      { label: 'Classic', type: 'radio', checked: theme === 'classic', click: () => chooseTheme('classic') }
-    ] },
     { type: 'separator' },
     { label: 'Quit', click: quitApp }
   ]));
