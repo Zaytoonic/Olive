@@ -1,10 +1,8 @@
-// Olive: real input devices, live metering + monitoring, mock fallback. Microphones only.
-
 const MOCK_DEVICES = [
-  { id: 'mic-1', name: 'USB Condenser Microphone', driver: 'USB Audio', channels: 'Mono · 48 kHz', isDefault: true, noise: 0.012, voice: 0.55 },
-  { id: 'mic-2', name: 'Headset Microphone', driver: 'Bluetooth Hands-Free', channels: 'Mono · 16 kHz', noise: 0.03, voice: 0.4 },
-  { id: 'mic-3', name: 'Webcam Microphone', driver: 'USB Video Device', channels: 'Stereo · 44.1 kHz', noise: 0.045, voice: 0.3 },
-  { id: 'mic-4', name: 'Realtek Microphone Array', driver: 'Built-in', channels: 'Stereo · 48 kHz', noise: 0.06, voice: 0.35 }
+  { id: 'mic-1', name: 'USB Condenser Microphone', isDefault: true, noise: 0.012, voice: 0.55 },
+  { id: 'mic-2', name: 'Headset Microphone', noise: 0.03, voice: 0.4 },
+  { id: 'mic-3', name: 'Webcam Microphone', noise: 0.045, voice: 0.3 },
+  { id: 'mic-4', name: 'Realtek Microphone Array', noise: 0.06, voice: 0.35 }
 ];
 
 let devices = MOCK_DEVICES;
@@ -58,7 +56,7 @@ function bindControls() {
   $('gate').addEventListener('input', e => { state.gateDb = +e.target.value; updateGate(); });
   $('gateAuto').addEventListener('change', e => { state.gateAuto = e.target.checked; updateGate(); });
   $('muteBtn').addEventListener('click', toggleMute);
-  document.addEventListener('keydown', e => { if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'm') toggleMute(); });
+  document.addEventListener('keydown', e => { if (e.ctrlKey && !e.altKey && !e.repeat && e.key.toLowerCase() === 'm') toggleMute(); });
 
   $('nrToggle').addEventListener('change', e => { state.nr = e.target.checked; $('nrAmount').disabled = !state.nr; applyNr(); updateHints(); });
   $('nrAmount').addEventListener('input', e => { state.nrAmount = +e.target.value; applyNr(); updateHints(); });
@@ -116,7 +114,6 @@ function setMonitor(on) {
   updateMonitorGain();
   updateHints();
 }
-// Smoothly move an AudioParam (avoids clicks).
 function rampTo(param, value, tc = 0.02, ctx = audioCtx) {
   if (!param || !ctx) return;
   param.cancelScheduledValues(ctx.currentTime);
@@ -202,7 +199,6 @@ function updateVolumeGain() { chains().forEach(ch => rampTo(ch.volGain.gain, vol
 function updateMonitorGain() {
   if (eqNodes) rampTo(eqNodes.outGain.gain, state.monitor && !state.muted ? state.monitorVol / 100 : 0, 0.02, eqNodes.ctx);
 }
-// Threshold in use right now: learned automatically, or the slider.
 let autoGateDb = -51;
 const gateDbNow = () => (state.gateAuto ? autoGateDb : state.gateDb);
 let shownGate = '';
@@ -255,28 +251,24 @@ function simulateAmplitude(dt) {
     voice = d.voice * (0.35 + 0.65 * syllable) * (0.8 + Math.random() * 0.4);
   }
   let noise = d.noise * (0.6 + Math.random() * 0.8);
-  if (state.nr) noise *= 1 - 0.95 * (state.nrAmount / 100);   // mock NR shrinks the noise floor
+  if (state.nr) noise *= 1 - 0.95 * (state.nrAmount / 100);
   return voice + noise;
 }
 
-let last = performance.now(), gateOpen = null;
+let last = performance.now();
 function tick() {
   // Hidden with the audio-thread gate on every chain: nothing to do on this thread at all.
-  if (isHidden() && analyser && eqNodes.gate && (!sendNodes || sendNodes.gate)) { gateOpen = eqNodes.gateIsOpen; last = performance.now(); return; }
+  if (isHidden() && analyser && eqNodes.gate && (!sendNodes || sendNodes.gate)) { last = performance.now(); return; }
   const now = performance.now();
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   const raw = analyser ? liveAmplitude() : simulateAmplitude(dt) * eqLevelFactor();
   let db = ampToDb(raw * volFactor());                       // in-app: 75% = unity
-  // main chain (meter + Listen): audio-thread gate reports its state; otherwise gate here.
-  // Mock mode (no live mic) shows the simulated gate on the meter.
   let open;
-  if (!analyser) { trackFloor(raw * volFactor(), dt); open = db >= gateDbNow(); }   // mock: simulated gate
+  if (!analyser) { trackFloor(raw * volFactor(), dt); open = db >= gateDbNow(); }
   else if (meterChain().gate) open = meterChain().gateIsOpen;
   else open = gateChain(meterChain(), raw, now);
-  gateOpen = open;
-  // send chain: same, from the audio that is actually going to Discord
   if (sendNodes && !sendNodes.gate && meterChain() !== sendNodes) gateChain(sendNodes, sendSrc ? chainAmplitude(sendNodes) : 0, now);
-  if (!open) db = -Infinity;                                 // noise gate closes
+  if (!open) db = -Infinity;
   if (state.muted) db = -Infinity;
   if (isHidden()) { smoothed = MIN_DB; peak = MIN_DB; return; }       // hidden in the tray: audio work only, no drawing
 
@@ -295,7 +287,7 @@ function tick() {
 }
 let compTick = 0, levelPct = 0, peakPct = 0;
 
-// Blue fill up to the knob on every slider.
+// Olive fill up to the knob on every slider.
 function paintRanges() {
   for (const r of document.querySelectorAll('input[type=range]')) {
     const v = (((r.value - r.min) / (r.max - r.min)) * 100).toFixed(1) + '%';
@@ -324,7 +316,6 @@ function drawMeter(now) {
     drawSendLevel();
   }
 }
-// Level other apps receive, read 5x per second, falling back slowly.
 let sendShown = MIN_DB, shownSendDb = '', shownSendCover = '';
 function drawSendLevel() {
   if (!sendNodes || !state.send) return;
@@ -340,7 +331,7 @@ function drawSendLevel() {
   if (text !== shownSendDb) { $('sendDb').textContent = text; shownSendDb = text; }
 }
 
-let stream = null, srcNode = null, audioCtx = null, analyser = null, buf = null, captureToken = 0;
+let stream = null, srcNode = null, audioCtx = null, analyser = null, captureToken = 0;
 let eqNodes = null;                 // main chain (meter + Listen) on audioCtx
 let sendCtx = null, sendNodes = null, sendSrc = null, sendCableId = null;   // send chain -> virtual cable
 
@@ -372,7 +363,7 @@ const eq = { on: true, lowCut: false, b: {} };          // b[key] = { f: Hz, g: 
 const bandDef = key => EQ_BANDS.find(d => d.key === key);
 function resetBand(key) { const d = bandDef(key); eq.b[key] = { f: d.freq, g: 0, q: d.q }; }
 EQ_BANDS.forEach(d => resetBand(d.key));
-let eqSel = null;                                       // selected band key
+let eqSel = null;
 // Each mic keeps its own EQ, stored by name. A mic seen for the first time starts from the EQ in use.
 const eqByMic = {};
 let eqOwner = null;                                     // the mic the EQ on screen belongs to
@@ -385,10 +376,9 @@ function restoreEq(src) {
   eq.lowCut = src.lowCut === true;
   for (const d of EQ_BANDS) {
     const b = (src.bands && src.bands[d.key]) || {};
-    const legacy = src.gains && src.gains[d.key];       // settings saved by v1.1 and earlier
     eq.b[d.key] = {
       f: num(b.f, EQ_F_MIN, EQ_F_MAX, d.freq),
-      g: num(b.g !== undefined ? b.g : legacy, -EQ_G_MAX, EQ_G_MAX, 0),
+      g: num(b.g, -EQ_G_MAX, EQ_G_MAX, 0),
       q: num(b.q, EQ_Q_MIN, EQ_Q_MAX, d.q)
     };
   }
@@ -411,8 +401,6 @@ function audioCtxInit() {
   try {
     audioCtx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
     eqNodes = buildChain(audioCtx);       // its analyser (~21 ms per reading) also drives the level meter
-    eqNodes.monGain = eqNodes.outGain;     // Listen level
-    buf = eqNodes.meterBuf;
   } catch (err) { audioCtx = null; eqNodes = null; console.error('Audio engine unavailable:', err); }
 }
 // One processing chain: noise reduction -> [mono] EQ -> volume -> gate -> output level -> this context's output device.
@@ -441,11 +429,11 @@ function buildChain(ctx) {
   outGain.connect(outMeter);
   const ch = { ctx, head, hp, bands, input: hp, output, volGain, comp, compOn: null, gateGain, outGain,
                meter, meterBuf: new Float32Array(meter.fftSize), outMeter, gateIsOpen: false, holdUntil: 0 };
-  applyCompTo(ch);                              // connects volume -> (compressor ->) gateGain
+  applyCompTo(ch);
   applyMonoTo(ch);
   applyEqTo(ch);
-  attachGate(ch);                               // swaps in the audio-thread gate once it has loaded
-  attachVoice(ch);                              // and the voice cleanup (noise and, on Auto, the gate)
+  attachGate(ch);
+  attachVoice(ch);
   return ch;
 }
 function applyEq() {
@@ -473,7 +461,7 @@ function eqLevelFactor() {
   const db = 0.2 * g('bass') + 0.2 * g('lowmid') + 0.25 * g('mid') + 0.15 * g('presence') + 0.1 * g('brilliance') + 0.1 * g('air') - (eq.lowCut ? 0.5 : 0);
   return Math.pow(10, db / 20);
 }
-function eqEdited() {                                   // user changed a band
+function eqEdited() {
   $('eqPreset').value = 'custom';
   applyEq();
   updateEqReadout();
@@ -571,24 +559,21 @@ function drawEqCurve() {
   const x0 = EQ_PAD.l, x1 = eqW - EQ_PAD.r;
   for (let i = 0; i < EQ_N; i++) eqFreqs[i] = eqF(x0 + (x1 - x0) * i / (EQ_N - 1));
 
-  const colors = GRAPH_COLORS;
-  // grid
   ctx.lineWidth = 1; ctx.font = "11px system-ui, 'Segoe UI', sans-serif"; ctx.textBaseline = 'middle';
   for (const g of [-12, -6, 0, 6, 12]) {
     const y = Math.round(eqY(g)) + 0.5;
-    ctx.strokeStyle = g === 0 ? colors.gridZero : colors.grid;
+    ctx.strokeStyle = g === 0 ? GRAPH_COLORS.gridZero : GRAPH_COLORS.grid;
     ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
-    ctx.fillStyle = colors.label; ctx.textAlign = 'right'; ctx.fillText((g > 0 ? '+' : '') + g, x0 - 6, y);
+    ctx.fillStyle = GRAPH_COLORS.label; ctx.textAlign = 'right'; ctx.fillText((g > 0 ? '+' : '') + g, x0 - 6, y);
   }
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
   for (const [f, t] of [[50, '50'], [100, '100'], [200, '200'], [500, '500'], [1000, '1k'], [2000, '2k'], [5000, '5k'], [10000, '10k']]) {
     const x = Math.round(eqX(f)) + 0.5;
-    ctx.strokeStyle = colors.vertical; ctx.beginPath(); ctx.moveTo(x, EQ_PAD.t); ctx.lineTo(x, eqH - EQ_PAD.b); ctx.stroke();
-    ctx.fillStyle = colors.label; ctx.fillText(t, x, eqH - 5);
+    ctx.strokeStyle = GRAPH_COLORS.vertical; ctx.beginPath(); ctx.moveTo(x, EQ_PAD.t); ctx.lineTo(x, eqH - EQ_PAD.b); ctx.stroke();
+    ctx.fillStyle = GRAPH_COLORS.label; ctx.fillText(t, x, eqH - 5);
   }
   if (!disp) return;
 
-  // response of each filter
   const set = (f, type, freq, gain, q) => { f.type = type; f.frequency.value = freq; f.gain.value = gain; f.Q.value = q; };
   const total = new Float32Array(EQ_N);
   const addResp = (f, into) => { f.getFrequencyResponse(eqFreqs, eqMag, eqPh); for (let i = 0; i < EQ_N; i++) into[i] += 20 * Math.log10(Math.max(eqMag[i], 1e-6)); };
@@ -605,20 +590,19 @@ function drawEqCurve() {
 
   const path = arr => { ctx.beginPath(); for (let i = 0; i < EQ_N; i++) { const x = x0 + (x1 - x0) * i / (EQ_N - 1), y = eqY(arr[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } };
   const y0 = eqY(0);
-  if (selCurve) {                                       // selected band's own shape
+  if (selCurve) {
     const col = bandDef(eqSel).color;
     path(selCurve); ctx.lineTo(x1, y0); ctx.lineTo(x0, y0); ctx.closePath();
     ctx.globalAlpha = 0.22; ctx.fillStyle = col; ctx.fill(); ctx.globalAlpha = 1;
   }
   path(total); ctx.lineTo(x1, y0); ctx.lineTo(x0, y0); ctx.closePath();
-  ctx.fillStyle = colors.fill; ctx.fill();
+  ctx.fillStyle = GRAPH_COLORS.fill; ctx.fill();
   path(total); ctx.strokeStyle = '#9AAF5E'; ctx.lineWidth = 2; ctx.stroke();
 
-  // points
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = "600 11px system-ui, 'Segoe UI', sans-serif";
   EQ_BANDS.forEach((d, i) => {
     const p = eqPoint(d.key), sel = d.key === eqSel;
-    if (sel) { ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.strokeStyle = colors.ring; ctx.lineWidth = 2; ctx.stroke(); }
+    if (sel) { ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.strokeStyle = GRAPH_COLORS.ring; ctx.lineWidth = 2; ctx.stroke(); }
     ctx.beginPath(); ctx.arc(p.x, p.y, 8.5, 0, Math.PI * 2); ctx.fillStyle = d.color; ctx.fill();
     ctx.fillStyle = '#000'; ctx.fillText(String(i + 1), p.x, p.y + 0.5);
   });
@@ -725,14 +709,12 @@ function bindEq() {
   $('eqToggle').addEventListener('change', e => { eq.on = e.target.checked; applyEq(); });
   $('lowCut').addEventListener('change', e => { eq.lowCut = e.target.checked; $('eqPreset').value = 'custom'; applyEq(); });
   window.addEventListener('resize', scheduleEqDraw);    // also catches display scale changes
-  // The canvas also changes size without the window doing so (devices panel, scrollbar), so watch it directly.
+  // The canvas also changes size without the window doing so (a scrollbar appearing), so watch it directly.
   new ResizeObserver(scheduleEqDraw).observe($('eqCurve'));
   syncEqUi();
 }
 
 // ---- Live input (Web Audio) ----
-
-
 function liveAmplitude() { return chainAmplitude(meterChain()); }
 function chainAmplitude(ch) {
   const b = ch.meterBuf;
@@ -744,10 +726,8 @@ function chainAmplitude(ch) {
 // ---- Noise gate ----
 // Preferred: gate-worklet.js on the audio thread (sample-accurate, 5 ms look-ahead, 150 ms hold).
 // Fallback if it can't load: gate from the main thread below (reacts every 20 ms, can clip word starts).
-const GATE_WORKLET_URL = window.GATE_WORKLET_URL || (location.protocol === 'file:' ? 'app://local/gate-worklet.js' : 'gate-worklet.js');
-const NR_WORKLET_URL = window.NR_WORKLET_URL || (location.protocol === 'file:' ? 'app://local/nr-worklet.js' : 'nr-worklet.js');
+const GATE_WORKLET_URL = 'app://local/gate-worklet.js', NR_WORKLET_URL = 'app://local/nr-worklet.js', VOICE_WORKLET_URL = 'app://local/voice-worklet.js';
 const gateModules = new WeakMap(), nrModules = new WeakMap();
-let gateMode = 'loading';                       // loading | audio-thread | main-thread
 function loadGateModule(ctx) {
   if (!gateModules.has(ctx)) gateModules.set(ctx, ctx.audioWorklet.addModule(GATE_WORKLET_URL));
   return gateModules.get(ctx);
@@ -766,12 +746,10 @@ async function attachGate(ch) {
     };
     node.onprocessorerror = () => detachGate(ch);
     ch.gate = node;
-    routeChain(ch);                             // volume -> worklet gate -> (compressor ->) gateGain
+    routeChain(ch);
     rampTo(ch.gateGain.gain, 1, 0.003, ch.ctx);  // gateGain is no longer the gate
-    gateMode = 'audio-thread';
     syncTicker();
   } catch (err) {
-    if (gateMode !== 'audio-thread') gateMode = 'main-thread';
     console.warn('Audio-thread noise gate unavailable, using the fallback:', err && err.message);
   }
 }
@@ -785,7 +763,6 @@ function detachGate(ch) {                         // worklet crashed: fall back 
 }
 // ---- Voice cleanup ----
 // voice-worklet.js: RNNoise plus a gate that opens on detected voice. If it can't run, nr-worklet.js and the volume gate remain.
-const VOICE_WORKLET_URL = window.VOICE_WORKLET_URL || (location.protocol === 'file:' ? 'app://local/voice-worklet.js' : 'voice-worklet.js');
 async function attachVoice(ch) {
   try {
     if (ch.ctx.sampleRate !== 48000) throw new Error('needs 48 kHz, got ' + ch.ctx.sampleRate);
@@ -893,7 +870,7 @@ async function startCapture() {
     const s = await navigator.mediaDevices.getUserMedia({
       audio: {
         deviceId: { exact: state.deviceId },
-        noiseSuppression: false, echoCancellation: false, autoGainControl: false   // raw mic: nr-worklet.js does the noise reduction
+        noiseSuppression: false, echoCancellation: false, autoGainControl: false   // raw mic: the app does its own noise reduction
       }
     });
     if (token !== captureToken) { s.getTracks().forEach(tr => tr.stop()); return; }
@@ -934,7 +911,7 @@ async function loadDevices() {
     found = inputs.filter(d => d.deviceId !== 'default').map(d => ({
       id: d.deviceId,
       name: d.label.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)$/i, '') || 'Microphone',
-      driver: '', channels: '', noise: 0.02, voice: 0.45,
+      noise: 0.02, voice: 0.45,
       isDefault: d.label === defaultLabel
     }));
   } catch (err) {
@@ -980,7 +957,6 @@ function sendHint(text, cls) {
   const h = $('sendHint');
   h.textContent = text;
   h.className = 'hint' + (cls ? ' ' + cls : '');
-  h.dataset.state = cls || 'neutral';
   $('sendToggle').parentElement.title = cls === 'on'
     ? 'Sending to the virtual cable. In Discord, choose "CABLE Output (VB-Audio Virtual Cable)" as your input device.'
     : 'Send the processed mic to VB-Audio Virtual Cable';
@@ -1032,7 +1008,6 @@ async function setSend(on) {
       return;
     }
     if (!(sendNodes && sendCableId === cable.deviceId && sendCtx.state !== 'closed')) {
-      // New low-latency audio engine whose output device is the cable itself.
       sendHint('Connecting…');
       state.send = false; teardownSend();
       const ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
@@ -1117,7 +1092,6 @@ function sysFailed(err) {
 function applySysToUi() {
   const ep = curSys();
   const hint = $('volumeHint');
-  hint.classList.toggle('sys', !!ep);
   if (ep) {
     volSent = null;
     state.volume = Math.round(ep.volume * 100);
@@ -1125,7 +1099,7 @@ function applySysToUi() {
     $('volumeVal').textContent = state.volume + '%';
     paintRanges();
     if (ep.muted !== state.muted) setMutedUi(ep.muted);
-    hint.textContent = '';                                  // normal state: no extra text
+    hint.textContent = '';
     hint.title = '';
     $('volume').title = 'Sets the Windows mic level and mute · affects all apps';
   } else {
@@ -1177,14 +1151,15 @@ async function pollSys() {
       storeSys(c);
       if (c.muted !== state.muted) { setAllMuted(c.muted); return; }
     }
-  } catch (err) { /* transient; next poll retries */ }
+  } catch { /* transient; next poll retries */ }
 }
 
 // ---- Saved settings ----
 // Restored on start: mic, volume (in-app), gate, mono, noise reduction, monitor level, EQ, send.
 // Not restored on purpose: Listen (could cause feedback at launch) and Mute (Windows keeps its own).
 const PREFS_KEY = 'olive.settings.v1', OLD_PREFS_KEY = 'micManager.settings.v1';   // the old name, from before the rebrand
-let prefDeviceId = null, prefDeviceName = null, sendWanted = true, saveTimer = null;
+let prefDeviceId = null, prefDeviceName = null, saveTimer = null;
+let sendWanted = true;                           // always on at launch; loadDevices() connects the cable once devices are known
 
 function loadPrefs() {
   let p = null;
@@ -1204,7 +1179,7 @@ function loadPrefs() {
   state.gateDb = num(p.gateDb, -60, -10, state.gateDb);
   if (typeof p.gateAuto === 'boolean') state.gateAuto = p.gateAuto;
   state.mono = p.mono === true;
-  if (typeof p.nr === 'boolean') state.nr = p.nr;   // remembered (on by default)
+  if (typeof p.nr === 'boolean') state.nr = p.nr;
   state.nrAmount = num(p.nrStrength, 0, 100, state.nrAmount);   // not the old nrAmount: that slider never changed the live audio
   state.monitorVol = num(p.monitorVol, 0, 100, state.monitorVol);
   state.comp = p.comp === true;
@@ -1212,8 +1187,6 @@ function loadPrefs() {
   state.muteHotkey = p.muteHotkey !== false;
   if (typeof p.muteAccel === 'string') state.muteAccel = p.muteAccel;
   state.eqOpen = p.eqOpen === true;
-  sendWanted = true;                             // Send to Discord is always on at launch;
-  state.send = true;                             // loadDevices() connects the cable once devices are known
   if (p.eqByMic && typeof p.eqByMic === 'object') Object.assign(eqByMic, p.eqByMic);
   const startEq = (prefDeviceName && eqByMic[prefDeviceName]) || p.eq;
   if (startEq && typeof startEq === 'object') restoreEq(startEq);
@@ -1250,7 +1223,7 @@ function savePrefs() {
   clearTimeout(saveTimer); saveTimer = null;
   const p = {
     deviceId: prefDeviceId, deviceName: prefDeviceName, volume: state.volume, gateDb: state.gateDb, gateAuto: state.gateAuto, mono: state.mono, tunedVoice: 1,
-    nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol, send: sendWanted,
+    nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol,
     comp: state.comp, compAmount: state.compAmount, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel, eqOpen: state.eqOpen,
     eq: snapshotEq(),
     eqByMic: eqOwner ? { ...eqByMic, [eqOwner]: snapshotEq() } : eqByMic
@@ -1401,11 +1374,12 @@ setEqOpen(state.eqOpen);
 initStartup();
 initMuteHotkey();
 ui.cover = $('meterCover'); ui.peak = $('meterPeak'); ui.levelDb = $('levelDb');
-syncTicker();                          // meter and any main-thread gate, only while needed
+syncTicker();
 applySysToUi();
 loadDevices();
 setInterval(pollSys, 2000);
 window.addEventListener('focus', pollSys);
 $('refreshBtn').addEventListener('click', loadDevices);
 if (window.appInfo) window.appInfo.version().then(v => { $('appFooter').textContent = 'Olive ' + v.replace(/\.0$/, ''); }).catch(() => {});
-navigator.mediaDevices.addEventListener('devicechange', () => { clearTimeout(window._dc); window._dc = setTimeout(loadDevices, 400); });
+let deviceChangeTimer = null;
+navigator.mediaDevices.addEventListener('devicechange', () => { clearTimeout(deviceChangeTimer); deviceChangeTimer = setTimeout(loadDevices, 400); });
