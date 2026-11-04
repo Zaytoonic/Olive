@@ -1,12 +1,19 @@
 // Copies the app (src + assets) into dist/Olive/resources/app, the folder Olive.exe runs.
-// The old copy is removed first, so nothing stale is left behind.
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const root = path.join(__dirname, '..');
 const appDir = path.join(root, 'dist', 'Olive', 'resources', 'app');
 if (!fs.existsSync(path.join(root, 'dist', 'Olive', 'Olive.exe'))) {
   console.error('dist/Olive/Olive.exe not found (the Electron runtime folder). Run npm run update-runtime first.');
+  process.exit(1);
+}
+// The running app locks its files, so removing the old copy would fail halfway and leave it broken.
+let running = false;
+try { running = execFileSync('tasklist', ['/FI', 'IMAGENAME eq Olive.exe', '/NH'], { encoding: 'utf8', windowsHide: true }).includes('Olive.exe'); } catch { /* can't tell: carry on */ }
+if (running) {
+  console.error('Olive is running. Quit it from the tray icon, then build again. Nothing was changed.');
   process.exit(1);
 }
 require('./build-helper').buildHelper();

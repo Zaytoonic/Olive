@@ -6,7 +6,6 @@ const fs = require('fs');
 // the same CPU with a moving meter, still smooth; only scrolling and dragging cost a little more, while they happen.
 app.disableHardwareAcceleration();
 
-// Project layout: src/main (this file), src/renderer (the window), assets (icons).
 const RENDERER = path.join(__dirname, '..', 'renderer');
 const ASSETS = path.join(__dirname, '..', '..', 'assets');
 
@@ -68,7 +67,7 @@ const HIDDEN_ARG = '--hidden';
 const startedHidden = process.argv.includes(HIDDEN_ARG);
 // Quoted: the install path has spaces, and an unquoted one makes Windows guess where the program name ends.
 const loginItemOpts = () => ({ path: `"${process.execPath}"`, args: [HIDDEN_ARG] });
-// A copy with its own settings folder is a test or a trial: it must never point Windows' login entry at itself.
+// A copy with its own settings folder is a test copy: it must never point Windows' login entry at itself.
 const canRegisterAtLogin = () => process.platform === 'win32' && app.isPackaged && !app.commandLine.hasSwitch('user-data-dir');
 function upgradeLoginItem() {                 // an entry saved by an older version has no quotes
   if (!canRegisterAtLogin()) return;
@@ -86,7 +85,7 @@ function moveOldLoginItem() {                 // the entry from when this app wa
 // at login has no app to load and opens Electron's "run this command" welcome window.
 ipcMain.handle('startup:get', () => {
   if (process.platform !== 'win32') return { supported: false, enabled: false };
-  if (!canRegisterAtLogin()) return { supported: false, enabled: false, reason: app.isPackaged ? 'Not in a trial copy' : 'Only in the built app (Olive.exe)' };
+  if (!canRegisterAtLogin()) return { supported: false, enabled: false, reason: app.isPackaged ? 'Not in a test copy' : 'Only in the built app (Olive.exe)' };
   return { supported: true, enabled: !!app.getLoginItemSettings(loginItemOpts()).openAtLogin };
 });
 ipcMain.handle('startup:set', (event, on) => {
