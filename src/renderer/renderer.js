@@ -10,7 +10,8 @@ let live = false;            // true when devices come from the system
 const state = {
   deviceId: MOCK_DEVICES.find(d => d.isDefault).id,
   volume: 75, muted: false, gateDb: -45, gateAuto: true,
-  nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M', eqOpen: false
+  nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M', eqOpen: false,
+  ptt: false, pttKey: null, outputId: 'default', outputName: null, setupDone: false, updateAuto: true
 };
 
 const $ = id => document.getElementById(id);
@@ -110,6 +111,7 @@ function setMonitor(on) {
   b.classList.toggle('on', on);
   b.textContent = on ? 'Listening' : 'Listen';
   b.setAttribute('aria-pressed', on);
+  syncCompare();
   syncChains();
   updateMonitorGain();
   updateHints();
@@ -197,7 +199,7 @@ function updateCompHint() {
 }
 function updateVolumeGain() { chains().forEach(ch => rampTo(ch.volGain.gain, volFactor(), 0.02, ch.ctx)); }
 function updateMonitorGain() {
-  if (eqNodes) rampTo(eqNodes.outGain.gain, state.monitor && !state.muted ? state.monitorVol / 100 : 0, 0.02, eqNodes.ctx);
+  if (eqNodes) rampTo(eqNodes.outGain.gain, state.monitor && talking() ? state.monitorVol / 100 : 0, talkFade(), eqNodes.ctx);
 }
 let autoGateDb = -51;
 const gateDbNow = () => (state.gateAuto ? autoGateDb : state.gateDb);
@@ -219,7 +221,7 @@ function refreshGateUi() {
     shownGate = label;
     $('gateVal').textContent = label;
     $('gateMark').style.left = dbToPct(t) + '%';
-    $('gateHint').textContent = byVoice ? 'Opens when it hears a voice, so fans and bumps stay out' : state.gateAuto ? 'Mutes you when you go quiet; follows your background noise' : "Mutes you when you're quieter than this";
+    $('gateHint').textContent = !byVoice && chains().some(ch => ch.gateFailed) ? 'Using the backup gate, which can clip the start of words' : byVoice ? 'Opens when it hears a voice, so fans and bumps stay out' : state.gateAuto ? 'Mutes you when you go quiet; follows your background noise' : "Mutes you when you're quieter than this";
   }
 }
 function updateHints() {
@@ -229,6 +231,7 @@ function updateHints() {
   $('nrHint').textContent = !state.nr ? 'Off: nothing is removed'
     : !live ? 'Simulated (mock mode)'
     : chains().some(ch => ch.nrFailed) ? 'Unavailable: the noise reduction engine could not start'
+    : chains().some(ch => ch.voiceFailed) ? "Using the backup noise reduction: the voice engine couldn't start"
     : 'Lowers fans, rumble and hiss. Turn it down to mix your natural sound back in';
   $('monHint').textContent = !state.monitor ? "You won't hear yourself"
     : analyser ? 'Use headphones to avoid echo'
@@ -261,16 +264,16 @@ function tick() {
   if (isHidden() && analyser && eqNodes.gate && (!sendNodes || sendNodes.gate)) { last = performance.now(); return; }
   const now = performance.now();
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
-  const raw = analyser ? liveAmplitude() : simulateAmplitude(dt) * eqLevelFactor();
+  const raw = analyser ? rawAmplitude(meterChain()) : simulateAmplitude(dt) * eqLevelFactor();
   let db = ampToDb(raw * volFactor());                       // in-app: 75% = unity
   let open;
   if (!analyser) { trackFloor(raw * volFactor(), dt); open = db >= gateDbNow(); }
   else if (meterChain().gate) open = meterChain().gateIsOpen;
-  else open = gateChain(meterChain(), raw, now);
+  else open = gateChain(meterChain(), liveAmplitude(), now);
   if (sendNodes && !sendNodes.gate && meterChain() !== sendNodes) gateChain(sendNodes, sendSrc ? chainAmplitude(sendNodes) : 0, now);
-  if (!open) db = -Infinity;
   if (state.muted) db = -Infinity;
   if (isHidden()) { smoothed = MIN_DB; peak = MIN_DB; return; }       // hidden in the tray: audio work only, no drawing
+  drawGateChip(open);
 
   const target = Math.max(MIN_DB, Math.min(6, db));
   smoothed = target > smoothed ? target : smoothed - 40 * dt; // fast attack, slow release
@@ -304,6 +307,16 @@ let shownCover = '', shownPeak = '', shownDb = '', dbShownAt = 0, windowHidden =
 const isHidden = () => windowHidden || document.hidden;
 if (window.appWindow) window.appWindow.onVisibility(v => { windowHidden = !v; if (v) scheduleEqDraw(); syncTicker(); });
 document.addEventListener('visibilitychange', () => syncTicker());
+let shownChip = null;
+function drawGateChip(open) {
+  const closedByKey = state.ptt && !pttOpen;
+  const text = state.muted ? '' : closedByKey ? (state.pttKey ? `Hold ${state.pttKey.label} to talk` : 'Choose a talk key') : open ? 'Gate open' : 'Gate closed';
+  if (text === shownChip) return;
+  shownChip = text;
+  const chip = $('gateChip');
+  chip.textContent = text;
+  chip.classList.toggle('open', text === 'Gate open');
+}
 function drawMeter(now) {
   const cover = 'scaleX(' + (1 - levelPct / 100).toFixed(3) + ')';
   if (cover !== shownCover) { ui.cover.style.transform = cover; shownCover = cover; }
@@ -339,12 +352,12 @@ let sendCtx = null, sendNodes = null, sendSrc = null, sendCableId = null;   // s
 // Six bands plus a low cut. Every band has a frequency, a gain and (peaking bands) a width (Q).
 // The graph is the control: drag a point (left/right = frequency, up/down = gain), scroll to change width.
 const EQ_BANDS = [
-  { key: 'bass',       name: 'Bass',       type: 'lowshelf',  freq: 100,   q: 0.7, color: '#0a84ff' },
-  { key: 'lowmid',     name: 'Low mid',    type: 'peaking',   freq: 250,   q: 1.0, color: '#5e5ce6' },
-  { key: 'mid',        name: 'Mid',        type: 'peaking',   freq: 1000,  q: 1.0, color: '#bf5af2' },
-  { key: 'presence',   name: 'Presence',   type: 'peaking',   freq: 4000,  q: 1.0, color: '#ff375f' },
-  { key: 'brilliance', name: 'Brilliance', type: 'peaking',   freq: 7000,  q: 1.4, color: '#ff9f0a' },
-  { key: 'air',        name: 'Air',        type: 'highshelf', freq: 10000, q: 0.7, color: '#64d2ff' }
+  { key: 'bass',       name: 'Bass',       type: 'lowshelf',  freq: 100,   q: 0.7, min: 20,   max: 300,   color: '#0a84ff' },
+  { key: 'lowmid',     name: 'Low mid',    type: 'peaking',   freq: 250,   q: 1.0, min: 100,  max: 800,   color: '#5e5ce6' },
+  { key: 'mid',        name: 'Mid',        type: 'peaking',   freq: 1000,  q: 1.0, min: 300,  max: 3000,  color: '#bf5af2' },
+  { key: 'presence',   name: 'Presence',   type: 'peaking',   freq: 4000,  q: 1.0, min: 1500, max: 8000,  color: '#ff375f' },
+  { key: 'brilliance', name: 'Brilliance', type: 'peaking',   freq: 7000,  q: 1.4, min: 3000, max: 14000, color: '#ff9f0a' },
+  { key: 'air',        name: 'Air',        type: 'highshelf', freq: 10000, q: 0.7, min: 5000, max: 20000, color: '#64d2ff' }
 ];
 const EQ_F_MIN = 20, EQ_F_MAX = 20000, EQ_G_MAX = 12, EQ_RANGE = 15, EQ_Q_MIN = 0.3, EQ_Q_MAX = 8;
 // A preset value is a gain in dB, or { g, f, q } to also set frequency and width.
@@ -363,7 +376,8 @@ const eq = { on: true, lowCut: false, b: {} };          // b[key] = { f: Hz, g: 
 const bandDef = key => EQ_BANDS.find(d => d.key === key);
 function resetBand(key) { const d = bandDef(key); eq.b[key] = { f: d.freq, g: 0, q: d.q }; }
 EQ_BANDS.forEach(d => resetBand(d.key));
-let eqSel = null;
+let eqSel = null, eqBypass = false;
+const eqBandsReset = [];
 // Each mic keeps its own EQ, stored by name. A mic seen for the first time starts from the EQ in use.
 const eqByMic = {};
 let eqOwner = null;                                     // the mic the EQ on screen belongs to
@@ -376,8 +390,14 @@ function restoreEq(src) {
   eq.lowCut = src.lowCut === true;
   for (const d of EQ_BANDS) {
     const b = (src.bands && src.bands[d.key]) || {};
+    // A band saved outside its range goes back to flat, not to the nearest edge: moving a boost across the spectrum would change your sound.
+    if (typeof b.f === 'number' && (b.f < d.min || b.f > d.max)) {
+      resetBand(d.key);
+      if (!eqBandsReset.includes(d.name)) eqBandsReset.push(d.name);
+      continue;
+    }
     eq.b[d.key] = {
-      f: num(b.f, EQ_F_MIN, EQ_F_MAX, d.freq),
+      f: num(b.f, d.min, d.max, d.freq),
       g: num(b.g, -EQ_G_MAX, EQ_G_MAX, 0),
       q: num(b.q, EQ_Q_MIN, EQ_Q_MAX, d.q)
     };
@@ -409,6 +429,9 @@ function buildChain(ctx) {
   const bands = EQ_BANDS.map(b => { const f = ctx.createBiquadFilter(); f.type = b.type; f.frequency.value = b.freq; f.Q.value = b.q; return f; });
   [hp, ...bands].reduce((a, b) => (a.connect(b), b));
   const head = ctx.createGain();                // the mic connects here; noise reduction is inserted after it
+  const rawMeter = ctx.createAnalyser();        // the mic before any processing: what the Input level meter shows
+  rawMeter.fftSize = 1024;
+  head.connect(rawMeter);
   head.connect(hp);
   const output = bands[bands.length - 1];
   const volGain = ctx.createGain(), gateGain = ctx.createGain(), outGain = ctx.createGain();
@@ -427,7 +450,7 @@ function buildChain(ctx) {
   const outMeter = ctx.createAnalyser();        // what actually leaves this chain, after gate, compressor and mute
   outMeter.fftSize = 1024;
   outGain.connect(outMeter);
-  const ch = { ctx, head, hp, bands, input: hp, output, volGain, comp, compOn: null, gateGain, outGain,
+  const ch = { ctx, head, rawMeter, hp, bands, input: hp, output, volGain, comp, compOn: null, gateGain, outGain,
                meter, meterBuf: new Float32Array(meter.fftSize), outMeter, gateIsOpen: false, holdUntil: 0 };
   applyCompTo(ch);
   applyMonoTo(ch);
@@ -442,14 +465,15 @@ function applyEq() {
   scheduleEqDraw();
 }
 function applyEqTo(ch) {
+  const on = eq.on && !(eqBypass && ch === eqNodes);    // comparing only changes what you hear, not what's sent
   EQ_BANDS.forEach((d, i) => {
     const s = eq.b[d.key], f = ch.bands[i];
     rampTo(f.frequency, s.f, 0.012, ch.ctx);            // short glide: no clicks while dragging
-    rampTo(f.gain, eq.on ? s.g : 0, 0.012, ch.ctx);
+    rampTo(f.gain, on ? s.g : 0, 0.012, ch.ctx);
     rampTo(f.Q, s.q, 0.012, ch.ctx);
   });
   // Low cut on: 80 Hz high-pass. Off: a 0 dB shelf, which passes audio unchanged.
-  const cut = eq.on && eq.lowCut;
+  const cut = on && eq.lowCut;
   ch.hp.type = cut ? 'highpass' : 'lowshelf';
   ch.hp.frequency.value = 80;
   ch.hp.gain.value = 0;
@@ -591,7 +615,9 @@ function drawEqCurve() {
   const path = arr => { ctx.beginPath(); for (let i = 0; i < EQ_N; i++) { const x = x0 + (x1 - x0) * i / (EQ_N - 1), y = eqY(arr[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } };
   const y0 = eqY(0);
   if (selCurve) {
-    const col = bandDef(eqSel).color;
+    const d = bandDef(eqSel), col = d.color;
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';            // how far this band can move
+    ctx.fillRect(eqX(d.min), EQ_PAD.t, eqX(d.max) - eqX(d.min), eqH - EQ_PAD.t - EQ_PAD.b);
     path(selCurve); ctx.lineTo(x1, y0); ctx.lineTo(x0, y0); ctx.closePath();
     ctx.globalAlpha = 0.22; ctx.fillStyle = col; ctx.fill(); ctx.globalAlpha = 1;
   }
@@ -615,7 +641,8 @@ function bindEqGraph() {
   const local = e => { const r = c.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
   const setFromPoint = (key, x, y) => {
     const s = eq.b[key];
-    s.f = clamp(eqF(x), EQ_F_MIN, EQ_F_MAX);
+    const d = bandDef(key);
+    s.f = clamp(eqF(x), d.min, d.max);
     let g = clamp(eqG(y), -EQ_G_MAX, EQ_G_MAX);
     if (Math.abs(g) < 0.3) g = 0;                         // easy to land exactly on 0 dB
     s.g = Math.round(g * 10) / 10;
@@ -664,12 +691,12 @@ function bindEqGraph() {
     if (/^[1-6]$/.test(e.key)) { selectBand(EQ_BANDS[+e.key - 1].key); e.preventDefault(); return; }
     if (e.key === 'Escape') { selectBand(null); return; }
     if (!eqSel) { if (e.key.startsWith('Arrow')) { selectBand(EQ_BANDS[0].key); e.preventDefault(); } return; }
-    const s = eq.b[eqSel], fine = e.shiftKey;
+    const s = eq.b[eqSel], fine = e.shiftKey, band = bandDef(eqSel);
     let handled = true;
     if (e.key === 'ArrowUp') s.g = clamp(Math.round((s.g + (fine ? 0.1 : 0.5)) * 10) / 10, -EQ_G_MAX, EQ_G_MAX);
     else if (e.key === 'ArrowDown') s.g = clamp(Math.round((s.g - (fine ? 0.1 : 0.5)) * 10) / 10, -EQ_G_MAX, EQ_G_MAX);
-    else if (e.key === 'ArrowRight') s.f = clamp(s.f * (fine ? 1.01 : 1.06), EQ_F_MIN, EQ_F_MAX);
-    else if (e.key === 'ArrowLeft') s.f = clamp(s.f / (fine ? 1.01 : 1.06), EQ_F_MIN, EQ_F_MAX);
+    else if (e.key === 'ArrowRight') s.f = clamp(s.f * (fine ? 1.01 : 1.06), band.min, band.max);
+    else if (e.key === 'ArrowLeft') s.f = clamp(s.f / (fine ? 1.01 : 1.06), band.min, band.max);
     else if ((e.key === '+' || e.key === '=' || e.key === ']') && bandDef(eqSel).type === 'peaking') s.q = clamp(Math.round(s.q * 1.15 * 100) / 100, EQ_Q_MIN, EQ_Q_MAX);
     else if ((e.key === '-' || e.key === '[') && bandDef(eqSel).type === 'peaking') s.q = clamp(Math.round(s.q / 1.15 * 100) / 100, EQ_Q_MIN, EQ_Q_MAX);
     else if (e.key === 'Delete' || e.key === 'Backspace' || e.key === '0') resetBand(eqSel);
@@ -688,6 +715,10 @@ function applyPreset(p) {
   eq.lowCut = p.lowCut;
 }
 // The EQ opens like a dropdown: closed by default, and the choice is remembered. Closed, nothing in it can be changed by accident.
+function syncCompare() {
+  const b = $('eqCompare');
+  b.disabled = !(state.monitor && eq.on);
+}
 function setEqOpen(open) {
   state.eqOpen = open === true;
   const b = $('eqExpand');
@@ -706,7 +737,19 @@ function bindEq() {
     const p = EQ_PRESETS[e.target.value]; if (!p) return;
     applyPreset(p); syncEqUi();
   });
-  $('eqToggle').addEventListener('change', e => { eq.on = e.target.checked; applyEq(); });
+  $('eqToggle').addEventListener('change', e => { eq.on = e.target.checked; applyEq(); syncCompare(); });
+  const compare = $('eqCompare');
+  const holdCompare = on => {
+    if (eqBypass === on) return;
+    eqBypass = on;
+    compare.classList.toggle('holding', on);
+    compare.textContent = on ? 'Hearing without EQ' : 'Hold to compare';
+    if (eqNodes) applyEqTo(eqNodes);
+  };
+  compare.addEventListener('pointerdown', e => { if (e.button === 0 && !compare.disabled) { compare.setPointerCapture(e.pointerId); holdCompare(true); } });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur']) compare.addEventListener(ev, () => holdCompare(false));
+  compare.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); holdCompare(true); } });
+  compare.addEventListener('keyup', () => holdCompare(false));
   $('lowCut').addEventListener('change', e => { eq.lowCut = e.target.checked; $('eqPreset').value = 'custom'; applyEq(); });
   window.addEventListener('resize', scheduleEqDraw);    // also catches display scale changes
   // The canvas also changes size without the window doing so (a scrollbar appearing), so watch it directly.
@@ -716,9 +759,10 @@ function bindEq() {
 
 // ---- Live input (Web Audio) ----
 function liveAmplitude() { return chainAmplitude(meterChain()); }
-function chainAmplitude(ch) {
+function rawAmplitude(ch) { return chainAmplitude(ch, ch.rawMeter); }
+function chainAmplitude(ch, meter = ch.meter) {
   const b = ch.meterBuf;
-  ch.meter.getFloatTimeDomainData(b);
+  meter.getFloatTimeDomainData(b);
   let sum = 0;
   for (let i = 0; i < b.length; i++) sum += b[i] * b[i];
   return Math.sqrt(sum / b.length) * 1.41;                   // RMS -> roughly peak-scaled
@@ -751,11 +795,15 @@ async function attachGate(ch) {
     syncTicker();
   } catch (err) {
     console.warn('Audio-thread noise gate unavailable, using the fallback:', err && err.message);
+    ch.gateFailed = true;
+    shownGate = ''; refreshGateUi();
   }
 }
 function detachGate(ch) {                         // worklet crashed: fall back to the main-thread gate
   const node = ch.gate; if (!node) return;
   ch.gate = null;
+  ch.gateFailed = true;
+  shownGate = ''; refreshGateUi();
   syncTicker();
   try { node.disconnect(); } catch {}
   routeChain(ch);
@@ -770,17 +818,18 @@ async function attachVoice(ch) {
     if (ch.ctx.state === 'closed') return;
     const node = new AudioWorkletNode(ch.ctx, 'voice-cleanup', { numberOfInputs: 1, numberOfOutputs: 1, parameterData: { strength: nrStrengthNow(), gate: state.gateAuto ? 1 : 0 } });
     node.port.onmessage = e => { if (state.gateAuto && typeof (e.data || {}).open === 'boolean') ch.gateIsOpen = e.data.open; };
-    node.onprocessorerror = () => { console.warn('Voice cleanup crashed; using the older noise reduction'); detachNr(ch); ch.voice = null; routeChain(ch); attachNr(ch); refreshGateUi(); };
+    node.onprocessorerror = () => { console.warn('Voice cleanup crashed; using the older noise reduction'); detachNr(ch); ch.voice = null; ch.voiceFailed = true; routeChain(ch); attachNr(ch); shownGate = ''; refreshGateUi(); updateHints(); };
     ch.nr = node; ch.voice = node;
     applyMonoTo(ch);
-    ch.head.disconnect();
-    ch.head.connect(node);
+    connectHead(ch, node);
     node.connect(ch.hp);
     routeChain(ch);
     shownGate = ''; refreshGateUi();
   } catch (err) {
     console.warn('Voice cleanup unavailable, using the older noise reduction:', err && err.message);
+    ch.voiceFailed = true;
     attachNr(ch);
+    shownGate = ''; refreshGateUi(); updateHints();
   }
 }
 
@@ -795,8 +844,7 @@ async function attachNr(ch) {
     const node = new AudioWorkletNode(ch.ctx, 'noise-reduction', { numberOfInputs: 1, numberOfOutputs: 1, parameterData: { strength: nrStrengthNow() } });
     node.onprocessorerror = () => { detachNr(ch); ch.nrFailed = true; updateHints(); };
     ch.nr = node;
-    ch.head.disconnect();
-    ch.head.connect(node);
+    connectHead(ch, node);
     node.connect(ch.hp);
   } catch (err) {
     ch.nrFailed = true;
@@ -807,8 +855,13 @@ async function attachNr(ch) {
 function detachNr(ch) {
   const node = ch.nr; if (!node) return;
   ch.nr = null;
-  try { ch.head.disconnect(); node.disconnect(); } catch {}
-  ch.head.connect(ch.hp);
+  try { node.disconnect(); } catch {}
+  connectHead(ch, ch.hp);
+}
+function connectHead(ch, next) {
+  ch.head.disconnect();
+  ch.head.connect(ch.rawMeter);
+  ch.head.connect(next);
 }
 const nrStrengthNow = () => (state.nr ? state.nrAmount : 0);
 function applyNr() {
@@ -887,12 +940,22 @@ async function startCapture() {
     updateHints();
   } catch (err) {
     if (token !== captureToken) return;
-    setStatus(`Couldn't open this microphone (${err.name}). Showing simulated level.`);
+    setStatus(micError(err) + ' Showing a simulated level.');
     updateHints();
   }
 }
 
 function setStatus(msg) { $('devStatus').textContent = msg; }
+function showNotice(msg) {
+  const n = $('appNotice');
+  if (!n.textContent.includes(msg)) n.textContent = (n.textContent ? n.textContent + ' ' : '') + msg;
+}
+function micError(err) {
+  if (err.name === 'NotAllowedError') return 'Windows is blocking microphone access. Check Settings > Privacy & security > Microphone.';
+  if (err.name === 'NotReadableError') return "This microphone isn't responding, or another app has taken it over.";
+  if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') return "This microphone isn't connected any more.";
+  return `Couldn't open this microphone (${err.name}).`;
+}
 let capturedId = null;
 const captureIsCurrent = () => stream && capturedId === state.deviceId && stream.getAudioTracks().every(tr => tr.readyState === 'live');
 
@@ -915,12 +978,12 @@ async function loadDevices() {
       isDefault: d.label === defaultLabel
     }));
   } catch (err) {
-    setStatus(`Microphone access unavailable (${err.name}). Using mock devices.`);
+    setStatus(micError(err) + ' Showing example microphones.');
   }
 
   live = found.length > 0;
   devices = live ? found : MOCK_DEVICES;
-  if (!live && !$('devStatus').textContent) setStatus('No microphones found. Using mock devices.');
+  if (!live && !$('devStatus').textContent) setStatus('No microphones found. Showing example microphones.');
   // Your chosen mic whenever it's connected, so plugging it back in returns to it; otherwise stay put, or use the default.
   const wanted = preferredDevice();
   if (wanted) state.deviceId = wanted.id;
@@ -936,6 +999,8 @@ async function loadDevices() {
   else if (!captureIsCurrent()) startCapture();
   syncSystem();
   if (sendWanted) await setSend(true);   // (re)connect the cable at start-up, after a rescan or a device change
+  if (live) await loadOutputs();
+  await updateSetup();
   retryWhileAudioStartsUp();
 }
 // Right after login, Windows audio can still be starting: no mics or no cable yet, and no event when they appear.
@@ -944,7 +1009,10 @@ let startupRetries = 0, startupRetryTimer = null;
 function retryWhileAudioStartsUp() {
   clearTimeout(startupRetryTimer);
   if (live && (!sendWanted || sendNodes)) { startupRetries = 0; return; }
-  if (startupRetries >= 12) return;
+  if (startupRetries >= 12) {
+    if (!live) setStatus('Still no microphone after a minute, so Olive stopped looking. Plug one in, or press refresh to try again.');
+    return;
+  }
   startupRetries++;
   startupRetryTimer = setTimeout(loadDevices, 5000);
 }
@@ -965,10 +1033,13 @@ function sendHint(text, cls) {
 function updateSendStatus() {
   const connected = !!sendNodes && state.send && live;
   $('sendLevel').hidden = !connected;
-  if (connected) sendHint(state.muted ? 'Muted: nothing is being sent' : 'Sending. In Discord, choose "CABLE Output" as your input', 'on');
+  if (!connected) return;
+  if (state.muted) sendHint('Muted: nothing is being sent', 'on');
+  else if (state.ptt && !pttOpen) sendHint(state.pttKey ? `Push to talk: hold ${state.pttKey.label} to send` : 'Push to talk: choose a key below', 'on');
+  else sendHint('Sending. In Discord, choose "CABLE Output" as your input', 'on');
 }
 function updateSendGain() {
-  if (sendNodes) rampTo(sendNodes.outGain.gain, state.send && !state.muted ? 1 : 0, 0.02, sendCtx);
+  if (sendNodes) rampTo(sendNodes.outGain.gain, state.send && talking() ? 1 : 0, talkFade(), sendCtx);
 }
 // The send chain reads the mic directly (its own source node) so nothing sits between it and the cable.
 function connectSendSource() {
@@ -1135,13 +1206,15 @@ function pushSysVolume() {
 }
 
 // Pick up changes made elsewhere (Windows Sound settings, other apps). Less often while hidden; the tray icon still follows.
-let hiddenPolls = 0;
+let hiddenPolls = 0, sysPollFailures = 0;
 async function pollSys() {
   const ep = curSys();
   if (!ep || volInflight || performance.now() - sysTouched < 1500) return;
   if (isHidden() && ++hiddenPolls % 5) return;
   try {
     const r = await sysApi.get(ep.id);
+    if (sysPollFailures >= 3) setStatus('');
+    sysPollFailures = 0;
     if (performance.now() - sysTouched < 1500 || curSys() !== ep) return;   // user acted meanwhile
     if (storeSys(r)) { applySysToUi(); setAllMuted(ep.muted); return; }      // the mic changed elsewhere: it wins
     for (const e of linkedEndpoints()) {
@@ -1151,7 +1224,9 @@ async function pollSys() {
       storeSys(c);
       if (c.muted !== state.muted) { setAllMuted(c.muted); return; }
     }
-  } catch { /* transient; next poll retries */ }
+  } catch {
+    if (++sysPollFailures === 3) setStatus("Lost contact with Windows mic control, so volume and mute may not apply. Still trying.");
+  }
 }
 
 // ---- Saved settings ----
@@ -1159,7 +1234,7 @@ async function pollSys() {
 // Not restored on purpose: Listen (could cause feedback at launch) and Mute (Windows keeps its own).
 const PREFS_KEY = 'olive.settings.v1', OLD_PREFS_KEY = 'micManager.settings.v1';   // the old name, from before the rebrand
 let prefDeviceId = null, prefDeviceName = null, saveTimer = null;
-let sendWanted = true;                           // always on at launch; loadDevices() connects the cable once devices are known
+let sendWanted = true;
 
 function loadPrefs() {
   let p = null;
@@ -1187,6 +1262,13 @@ function loadPrefs() {
   state.muteHotkey = p.muteHotkey !== false;
   if (typeof p.muteAccel === 'string') state.muteAccel = p.muteAccel;
   state.eqOpen = p.eqOpen === true;
+  if (typeof p.send === 'boolean') { sendWanted = p.send; state.send = p.send; }
+  state.ptt = p.ptt === true;
+  if (p.pttKey && Number.isInteger(p.pttKey.vk) && typeof p.pttKey.label === 'string') state.pttKey = { vk: p.pttKey.vk, label: p.pttKey.label };
+  if (typeof p.outputId === 'string') state.outputId = p.outputId;
+  if (typeof p.outputName === 'string') state.outputName = p.outputName;
+  state.setupDone = p.setupDone === true;
+  state.updateAuto = p.updateAuto !== false;
   if (p.eqByMic && typeof p.eqByMic === 'object') Object.assign(eqByMic, p.eqByMic);
   const startEq = (prefDeviceName && eqByMic[prefDeviceName]) || p.eq;
   if (startEq && typeof startEq === 'object') restoreEq(startEq);
@@ -1223,12 +1305,13 @@ function savePrefs() {
   clearTimeout(saveTimer); saveTimer = null;
   const p = {
     deviceId: prefDeviceId, deviceName: prefDeviceName, volume: state.volume, gateDb: state.gateDb, gateAuto: state.gateAuto, mono: state.mono, tunedVoice: 1,
-    nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol,
+    nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol, send: sendWanted,
+    ptt: state.ptt, pttKey: state.pttKey, outputId: state.outputId, outputName: state.outputName, setupDone: state.setupDone, updateAuto: state.updateAuto,
     comp: state.comp, compAmount: state.compAmount, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel, eqOpen: state.eqOpen,
     eq: snapshotEq(),
     eqByMic: eqOwner ? { ...eqByMic, [eqOwner]: snapshotEq() } : eqByMic
   };
-  try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch { /* storage unavailable: settings just won't persist */ }
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (err) { showNotice("Your settings couldn't be saved, so changes will be lost when Olive closes: " + err.message); }
 }
 function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(savePrefs, 300); }
 // Any control the user touches -> save shortly after (handlers run first, so state is current).
@@ -1336,6 +1419,181 @@ function initMuteHotkey() {
   applyMuteHotkey();
 }
 
+// ---- Push to talk ----
+// Silences what leaves Olive (the cable and Listen) unless the key is held. It doesn't touch Windows mute: that takes too long to follow a key.
+const PTT_TAIL_MS = 200;                       // keeps the end of the last word after the key comes up
+let pttOpen = false, pttTail = null, pttChoosing = false;
+const talking = () => !state.muted && (!state.ptt || pttOpen);
+const talkFade = () => (state.ptt && pttOpen ? 0.005 : 0.02);
+function setPttOpen(open) {
+  pttOpen = open;
+  updateMonitorGain();
+  updateSendGain();
+  updateSendStatus();
+}
+function onPttKey(down) {
+  clearTimeout(pttTail);
+  if (down) setPttOpen(true);
+  else pttTail = setTimeout(() => setPttOpen(false), PTT_TAIL_MS);
+}
+function vkFromCode(code) {
+  let m;
+  if ((m = /^Key([A-Z])$/.exec(code))) return { vk: m[1].charCodeAt(0), label: m[1] };
+  if ((m = /^Digit(\d)$/.exec(code))) return { vk: 0x30 + +m[1], label: m[1] };
+  if ((m = /^F(\d+)$/.exec(code)) && +m[1] >= 1 && +m[1] <= 24) return { vk: 0x6f + +m[1], label: code };
+  if ((m = /^Numpad(\d)$/.exec(code))) return { vk: 0x60 + +m[1], label: 'Numpad ' + m[1] };
+  const named = { Space: [0x20, 'Space'], CapsLock: [0x14, 'Caps Lock'], Tab: [0x09, 'Tab'], Backquote: [0xc0, '`'], ShiftLeft: [0xa0, 'Left Shift'], ShiftRight: [0xa1, 'Right Shift'],
+    ControlLeft: [0xa2, 'Left Ctrl'], ControlRight: [0xa3, 'Right Ctrl'], AltLeft: [0xa4, 'Left Alt'], AltRight: [0xa5, 'Right Alt'], Insert: [0x2d, 'Insert'], Pause: [0x13, 'Pause'], ScrollLock: [0x91, 'Scroll Lock'] };
+  return named[code] ? { vk: named[code][0], label: named[code][1] } : null;
+}
+function showPttHint() {
+  const h = $('pttHint');
+  h.classList.remove('notice');
+  if (!state.ptt) h.textContent = 'Off: your mic is open unless you mute it';
+  else if (!state.pttKey) h.textContent = 'Choose a key to hold while you talk';
+  else if (!state.send) h.textContent = `Hold ${state.pttKey.label} to talk. Turn on Send to Discord too: apps using your mic directly aren't affected`;
+  else h.textContent = /^[A-Z0-9]$/.test(state.pttKey.label) ? `Hold ${state.pttKey.label} to talk. It still types ${state.pttKey.label} in other apps` : `Hold ${state.pttKey.label} to talk`;
+  $('pttChange').textContent = state.pttKey ? 'Change key' : 'Choose key';
+}
+async function applyPtt() {
+  clearTimeout(pttTail);
+  setPttOpen(false);
+  showPttHint();
+  shownChip = null;
+  if (!window.appPtt) return;
+  try {
+    await window.appPtt.set(state.ptt && state.pttKey ? state.pttKey.vk : 0);
+  } catch (err) {
+    // Fails closed: staying silent is safer than an open mic you think is off.
+    $('pttHint').textContent = "Couldn't watch the key, so your mic stays silent. Turn this off to talk: " + cleanErr(err);
+    $('pttHint').classList.add('notice');
+  }
+}
+function finishChoosingPtt(key) {
+  pttChoosing = false;
+  $('pttChange').classList.remove('capturing');
+  if (key) { state.pttKey = key; savePrefs(); }
+  applyPtt();
+}
+function startChoosingPtt() {
+  if (pttChoosing) return;
+  pttChoosing = true;
+  $('pttChange').classList.add('capturing');
+  $('pttChange').textContent = 'Press a key…';
+  $('pttHint').textContent = 'Press a key or a side mouse button, or Esc to cancel';
+}
+window.addEventListener('keydown', e => {
+  if (!pttChoosing) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (e.code === 'Escape') { finishChoosingPtt(null); return; }
+  const key = vkFromCode(e.code);
+  if (key) finishChoosingPtt(key);
+  else $('pttHint').textContent = 'That key can\'t be used. Try a letter, an F key, Space, or a side mouse button. Esc cancels';
+}, true);
+window.addEventListener('pointerdown', e => {
+  if (!pttChoosing) return;
+  const key = { 1: { vk: 0x04, label: 'Middle mouse' }, 3: { vk: 0x05, label: 'Mouse 4' }, 4: { vk: 0x06, label: 'Mouse 5' } }[e.button];
+  if (!key) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  finishChoosingPtt(key);
+}, true);
+window.addEventListener('blur', () => { if (pttChoosing) finishChoosingPtt(null); });
+function initPtt() {
+  const t = $('pttToggle');
+  if (!window.appPtt) { t.disabled = true; $('pttChange').disabled = true; $('pttHint').textContent = 'Only in the Windows app'; return; }
+  window.appPtt.onKey(onPttKey);
+  t.checked = state.ptt;
+  t.addEventListener('change', () => {
+    state.ptt = t.checked;
+    if (state.ptt && !state.pttKey) startChoosingPtt();
+    applyPtt();
+  });
+  $('pttChange').addEventListener('click', startChoosingPtt);
+  applyPtt();
+}
+
+// ---- Where Listen and the mute sound play ----
+let appliedOutput = 'default';
+async function setOutput(id) {
+  if (id === appliedOutput) return;
+  const sink = id === 'default' ? '' : id;
+  await Promise.all([audioCtx ? audioCtx.setSinkId(sink) : null, muteSound.setSinkId(sink)]);
+  appliedOutput = id;
+}
+async function loadOutputs() {
+  const hint = $('outputHint'), pick = $('outputSelect');
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    const outs = all.filter(d => d.kind === 'audiooutput' && d.deviceId !== 'communications' && !isCableLabel(d.label));
+    pick.innerHTML = '';
+    for (const d of outs) {
+      const name = d.deviceId === 'default' ? 'Windows default' + (d.label ? ` (${d.label.replace(/^[^-]*-\s*/, '')})` : '') : d.label || 'Speakers';
+      pick.add(new Option(name, d.deviceId));
+    }
+    if (!outs.some(d => d.deviceId === 'default')) pick.add(new Option('Windows default', 'default'), 0);
+    const wanted = state.outputId === 'default' ? { deviceId: 'default' } : outs.find(d => d.deviceId === state.outputId) || outs.find(d => d.label === state.outputName);
+    pick.value = wanted ? wanted.deviceId : 'default';
+    hint.textContent = wanted ? '' : `${state.outputName || 'That device'} isn't connected. Using Windows default until it's back.`;
+    await setOutput(pick.value);
+  } catch (err) {
+    hint.textContent = "Couldn't change where this plays: " + err.message;
+  }
+}
+function bindOutput() {
+  $('outputSelect').addEventListener('change', e => {
+    const pick = e.target;
+    state.outputId = pick.value;
+    state.outputName = pick.value === 'default' ? null : pick.selectedOptions[0].textContent;
+    loadOutputs();
+  });
+}
+
+// ---- First-run setup ----
+let freshInstall = false;
+async function updateSetup() {
+  let found = false;
+  try { found = !!(await findCable()); } catch { /* treated as not found */ }
+  if (found && !freshInstall && !state.setupDone) { state.setupDone = true; savePrefs(); }
+  $('setupCable').textContent = found ? 'Found: the virtual cable is installed.' : 'Not found yet.';
+  $('setupDownload').hidden = found;
+  $('setupCard').hidden = state.setupDone;
+  $('setupOpen').hidden = found || !state.setupDone;
+}
+function bindSetup() {
+  $('setupDownload').addEventListener('click', () => { if (window.appInfo) window.appInfo.open('vbcable'); });
+  $('setupCheck').addEventListener('click', () => loadDevices());
+  $('setupDone').addEventListener('click', () => { state.setupDone = true; savePrefs(); updateSetup(); });
+  $('setupOpen').addEventListener('click', () => { state.setupDone = false; freshInstall = true; updateSetup(); });
+}
+
+// ---- Updates ----
+const UPDATE_EVERY_MS = 24 * 3600 * 1000;
+let updateAvailable = false;
+async function checkUpdates(asked) {
+  if (!window.appInfo) return;
+  const hint = $('updateHint'), btn = $('updateBtn');
+  if (asked) { hint.textContent = 'Checking…'; btn.disabled = true; }
+  let r;
+  try { r = await window.appInfo.checkForUpdate(); } catch (err) { r = { status: 'unavailable', reason: cleanErr(err) }; }
+  btn.disabled = false;
+  if (r.status === 'available') {
+    updateAvailable = true;
+    hint.textContent = `Olive ${r.version} is available`;
+    btn.textContent = 'Download';
+  } else if (asked) {
+    hint.textContent = r.status === 'current' ? "You're on the latest version" : "Couldn't check for updates: " + r.reason;
+  }
+}
+function initUpdates() {
+  const t = $('updateAuto');
+  t.checked = state.updateAuto;
+  t.addEventListener('change', () => { state.updateAuto = t.checked; });
+  $('updateBtn').addEventListener('click', () => { if (updateAvailable) window.appInfo.open('release'); else checkUpdates(true); });
+  const auto = () => { if (state.updateAuto) checkUpdates(false); };
+  setTimeout(auto, 20000);
+  setInterval(auto, UPDATE_EVERY_MS);
+}
+
 // ---- Start with Windows ----
 // window.appStartup comes from preload.js; Windows keeps the setting (Settings > Apps > Startup).
 async function initStartup() {
@@ -1363,7 +1621,9 @@ async function initStartup() {
 }
 
 // ---- Init ----
-applyTunedOnce(loadPrefs());
+const savedPrefs = loadPrefs();
+freshInstall = !savedPrefs;
+applyTunedOnce(savedPrefs);
 showPrefsInUi();
 renderDevices();
 $('micSelect').addEventListener('change', e => selectDevice(e.target.value));
@@ -1373,6 +1633,15 @@ bindControls(); bindEq(); updateGate(); updateHints(); updateCompHint(); paintRa
 setEqOpen(state.eqOpen);
 initStartup();
 initMuteHotkey();
+initPtt();
+bindOutput();
+bindSetup();
+initUpdates();
+if (eqBandsReset.length) {
+  $('eqNotice').textContent = `${eqBandsReset.join(' and ')} had moved outside ${eqBandsReset.length > 1 ? 'their ranges' : 'its range'}, so ${eqBandsReset.length > 1 ? 'they were' : 'it was'} reset to flat.`;
+  savePrefs();
+}
+if (window.appInfo) window.appInfo.notices().then(list => list.forEach(showNotice)).catch(() => {});
 ui.cover = $('meterCover'); ui.peak = $('meterPeak'); ui.levelDb = $('levelDb');
 syncTicker();
 applySysToUi();

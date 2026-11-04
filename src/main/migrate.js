@@ -4,7 +4,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const OLD_SETTINGS_FOLDER = 'mic-manager';
-const OLD_LOGIN_ENTRY = 'electron.app.Mic Manager';
+const OLD_LOGIN_ENTRY = 'electron.app.Mic Manager', LOGIN_ENTRY = 'electron.app.Olive';
 const RUN = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 const APPROVED = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run';
 
@@ -47,4 +47,16 @@ function moveLoginEntry(register, name = OLD_LOGIN_ENTRY) {
   return enabled ? 'moved' : 'moved-off';
 }
 
-module.exports = { OLD_SETTINGS_FOLDER, RUN, APPROVED, migrateSettings, moveLoginEntry, reg };
+// If the folder was moved or the app reinstalled elsewhere, the entry points at nothing and Windows silently skips it at login.
+// An entry pointing at a copy that still exists is left alone: that copy may be the one you want starting.
+function repairLoginEntry(exePath, register, name = LOGIN_ENTRY) {
+  const found = reg('query', RUN, '/v', name);
+  if (found === null) return 'none';
+  const target = found.match(/REG_SZ\s+"([^"]+)"/);
+  if (!target || target[1].toLowerCase() === exePath.toLowerCase() || fs.existsSync(target[1])) return 'fine';
+  const approved = reg('query', APPROVED, '/v', name);
+  const state = approved && approved.match(/REG_BINARY\s+([0-9A-Fa-f]{2})/);
+  return register(!state || parseInt(state[1], 16) % 2 === 0) ? 'repaired' : 'failed';
+}
+
+module.exports = { OLD_SETTINGS_FOLDER, RUN, APPROVED, migrateSettings, moveLoginEntry, repairLoginEntry, reg };

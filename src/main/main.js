@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, protocol, globalShortcut, screen } = require('electron');
+const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, protocol, globalShortcut, screen, shell, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -31,11 +31,12 @@ function serveWorklet(request) {
     .catch(() => new Response('Not found', { status: 404 }));
 }
 const { HelperClient } = require('./sysmic-client');
-const { OLD_SETTINGS_FOLDER, migrateSettings, moveLoginEntry } = require('./migrate');
+const { OLD_SETTINGS_FOLDER, migrateSettings, moveLoginEntry, repairLoginEntry } = require('./migrate');
+const { checkForUpdate } = require('./updates');
 
 // ---- Windows microphone control (volume + mute) via the win-audio helper ----
 const HELPER_EXE = path.join(__dirname, 'win-audio.exe');
-let helper = null;
+let helper = null, pttKey = 0;
 function getHelper(allowRestart) {
   if (process.platform !== 'win32') return null;
   if (!helper || (helper.dead && allowRestart)) {
@@ -46,14 +47,29 @@ function getHelper(allowRestart) {
         '-NoLogo', '-NoProfile', '-NonInteractive', '-MTA', '-ExecutionPolicy', 'Bypass',   // MTA: firmware events arrive without a message loop
         '-File', path.join(__dirname, 'win-audio.ps1')
       ]);
-    helper.onEvent = ev => { if (ev === 'mic-key' && win && !win.isDestroyed()) win.webContents.send('mute:mic-key'); };
+    helper.onEvent = ev => {
+      if (!win || win.isDestroyed()) return;
+      if (ev === 'mic-key') win.webContents.send('mute:mic-key');
+      else if (ev === 'ptt-down' || ev === 'ptt-up') win.webContents.send('ptt:key', ev === 'ptt-down');
+    };
     const started = helper;
+    if (pttKey) started.call('ptt', pttKey).catch(() => {});
     helper.onDeath = () => {                   // not when quitting; wait a little so a failing helper can't spin
+      if (win && !win.isDestroyed()) win.webContents.send('ptt:key', false);   // a key the helper can't see any more counts as released
       if (!quitting && helper === started) setTimeout(() => { if (!quitting) getHelper(true); }, 3000);
     };
   }
   return helper;
 }
+ipcMain.handle('ptt:set', async (event, vk) => {
+  const key = Number(vk);
+  if (!Number.isInteger(key) || key < 0 || key > 255) throw new Error('bad key');
+  pttKey = key;
+  const h = getHelper(true);
+  if (!h) throw new Error('Windows only');
+  await h.call('ptt', key);
+  return true;
+});
 ipcMain.handle('sysmic', (event, cmd, ...args) => {
   if (!['list', 'get', 'setvol', 'setmute'].includes(cmd)) throw new Error('unknown command');
   if (cmd === 'setvol' && !(Number(args[1]) >= 0 && Number(args[1]) <= 1)) throw new Error('bad volume');
@@ -74,12 +90,14 @@ function upgradeLoginItem() {                 // an entry saved by an older vers
   const old = { path: process.execPath, args: [HIDDEN_ARG] };
   if (app.getLoginItemSettings(old).openAtLogin && !app.getLoginItemSettings(loginItemOpts()).openAtLogin) app.setLoginItemSettings({ openAtLogin: true, ...loginItemOpts() });
 }
-function moveOldLoginItem() {                 // the entry from when this app was called Mic Manager
+const registerLoginItem = enabled => {
+  app.setLoginItemSettings({ openAtLogin: true, enabled, ...loginItemOpts() });
+  return !!app.getLoginItemSettings(loginItemOpts()).openAtLogin;
+};
+function fixLoginItem() {
   if (!canRegisterAtLogin()) return;
-  moveLoginEntry(enabled => {
-    app.setLoginItemSettings({ openAtLogin: true, enabled, ...loginItemOpts() });
-    return !!app.getLoginItemSettings(loginItemOpts()).openAtLogin;
-  });
+  if (moveLoginEntry(registerLoginItem) === 'failed') notices.push("Start with Windows couldn't be moved to Olive. Turn it on again below.");
+  if (repairLoginEntry(process.execPath, registerLoginItem) === 'failed') notices.push("Olive's folder moved and Start with Windows couldn't follow it. Turn it on again below.");
 }
 // Only the built app may register itself. From source (npm start) process.execPath is the bare electron.exe, which
 // at login has no app to load and opens Electron's "run this command" welcome window.
@@ -97,6 +115,7 @@ ipcMain.handle('startup:set', (event, on) => {
 
 // ---- Window + tray: closing the window hides it; Quit is in the tray menu ----
 let win = null, tray = null, quitting = false, trayHintShown = false;
+const notices = [];                            // problems from starting up, for the page to show
 
 function showWindow() {
   if (!win) return;
@@ -170,6 +189,19 @@ ipcMain.handle('mute:hotkey', (event, accelerator) => {
   return ok;
 });
 ipcMain.handle('app:version', () => app.getVersion());
+ipcMain.handle('app:notices', () => notices.splice(0));
+let releaseUrl = null;
+ipcMain.handle('update:check', async () => {
+  if (!app.isPackaged) return { status: 'unavailable', reason: 'only checks in the built app' };
+  const result = await checkForUpdate(app.getVersion(), (url, options) => net.fetch(url, options));
+  releaseUrl = result.url || releaseUrl;
+  return { status: result.status, version: result.version, reason: result.reason };
+});
+// The page names a link instead of passing an address, so nothing in it can open anything else.
+ipcMain.handle('app:open', (event, name) => {
+  const url = name === 'vbcable' ? 'https://vb-audio.com/Cable/' : name === 'release' ? releaseUrl : null;
+  if (url) shell.openExternal(url);
+});
 
 // A red slashed-mic badge on the taskbar button while muted, when the window is open.
 function updateTaskbarBadge() {
@@ -202,11 +234,13 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   // Holding the lock means no other copy is using this folder. A test copy's folder has no old folder beside it, so it starts clean.
   const settingsDir = app.getPath('userData');
-  migrateSettings(path.join(path.dirname(settingsDir), OLD_SETTINGS_FOLDER), settingsDir);
+  if (migrateSettings(path.join(path.dirname(settingsDir), OLD_SETTINGS_FOLDER), settingsDir) === 'failed') {
+    notices.push("Couldn't bring over your Mic Manager settings, so Olive started with its defaults. The old settings are untouched.");
+  }
   app.on('second-instance', showWindow);
 
   app.whenReady().then(() => {
-    moveOldLoginItem();
+    fixLoginItem();
     upgradeLoginItem();
     protocol.handle('app', serveWorklet);
     // Allow microphone access for the app's own page only (no camera, no other permissions).

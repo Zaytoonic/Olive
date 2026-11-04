@@ -1,6 +1,6 @@
 {
   "name": "olive",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Olive: microphone manager for Windows. Windows mic volume/mute, noise gate, noise reduction, EQ, compressor, send to Discord",
   "main": "src/main/main.js",
   "scripts": {
