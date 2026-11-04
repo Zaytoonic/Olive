@@ -20,7 +20,15 @@ contextBridge.exposeInMainWorld('appMute', {
 });
 
 contextBridge.exposeInMainWorld('appInfo', {
-  version: () => ipcRenderer.invoke('app:version')
+  version: () => ipcRenderer.invoke('app:version'),
+  notices: () => ipcRenderer.invoke('app:notices'),
+  checkForUpdate: () => ipcRenderer.invoke('update:check'),
+  open: name => ipcRenderer.invoke('app:open', String(name))
+});
+
+contextBridge.exposeInMainWorld('appPtt', {
+  set: vk => ipcRenderer.invoke('ptt:set', vk),
+  onKey: cb => { ipcRenderer.on('ptt:key', (event, down) => cb(down === true)); }
 });
 
 contextBridge.exposeInMainWorld('appStartup', {

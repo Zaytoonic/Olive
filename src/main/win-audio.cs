@@ -1,7 +1,9 @@
 // Olive helper: controls Windows microphone (capture) endpoints via Core Audio.
 // Protocol: one request per stdin line "id<TAB>cmd<TAB>args...", one JSON reply per stdout line.
 // Commands: list | get <endpointId> | setvol <endpointId> <0..1> | setmute <endpointId> <0|1>
-// Also prints {"event":"mic-key"} when an ASUS laptop's dedicated mic key is pressed.
+//           | ptt <virtual key code, 0 = off>
+// Also prints {"event":"mic-key"} when an ASUS laptop's dedicated mic key is pressed,
+// and {"event":"ptt-down"} / {"event":"ptt-up"} for the push-to-talk key.
 // Compiled to win-audio.exe by tools/build-helper.js. win-audio.ps1 compiles this same file at run time if the exe is missing.
 using System;
 using System.Collections.Generic;
@@ -91,6 +93,47 @@ namespace Olive
                 watcher.Start();
             }
             catch (Exception) { }
+        }
+    }
+
+    // Windows has no system-wide "key released" event short of a keyboard hook, so this polls the one key that was chosen. No other key is looked at.
+    public static class PushToTalk
+    {
+        [DllImport("user32.dll")]
+        static extern short GetAsyncKeyState(int vk);
+        static volatile int key = 0;
+        static System.Threading.Thread thread;
+
+        public static string Set(string vk)
+        {
+            int k = int.Parse(vk, CultureInfo.InvariantCulture);
+            if (k < 0 || k > 255) throw new Exception("bad key");
+            key = k;
+            if (k != 0 && thread == null)
+            {
+                thread = new System.Threading.Thread(Watch);
+                thread.IsBackground = true;
+                thread.Start();
+            }
+            return "true";
+        }
+
+        static void Say(bool down)
+        {
+            Console.Out.WriteLine(down ? "{\"event\":\"ptt-down\"}" : "{\"event\":\"ptt-up\"}");
+            Console.Out.Flush();
+        }
+
+        static void Watch()
+        {
+            bool down = false;
+            while (true)
+            {
+                int k = key;
+                bool now = k != 0 && (GetAsyncKeyState(k) & 0x8000) != 0;
+                if (now != down) { down = now; Say(now); }
+                System.Threading.Thread.Sleep(k != 0 ? 8 : 100);
+            }
         }
     }
 
@@ -216,6 +259,7 @@ namespace Olive
                 else if (cmd == "get" && a.Length == 3) result = Get(a[2]);
                 else if (cmd == "setvol" && a.Length == 4) result = SetVolume(a[2], a[3]);
                 else if (cmd == "setmute" && a.Length == 4) result = SetMute(a[2], a[3]);
+                else if (cmd == "ptt" && a.Length == 3) result = PushToTalk.Set(a[2]);
                 else throw new Exception("bad command: " + cmd);
                 return "{\"id\":" + reqId + ",\"ok\":true,\"result\":" + result + "}";
             }

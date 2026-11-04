@@ -90,6 +90,22 @@ select.current-name:focus-visible { outline: 2px solid var(--accent-text); }
 select.current-name:active { transform: none; }
 select.current-name option { font-size: 15px; font-weight: 400; background: var(--surface); }
 .notice { color: var(--yellow); }
+.meter-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.gate-chip { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 9999px; background: var(--tile); color: var(--text-2); white-space: nowrap; }
+.gate-chip:empty { display: none; }
+.gate-chip.open { background: rgba(107, 127, 58, 0.28); color: var(--accent-text); }
+.setup { margin-bottom: 16px; box-shadow: inset 0 0 0 1px var(--accent); }
+.setup[hidden] { display: none; }
+.setup-steps { margin: 10px 0 12px; padding-left: 22px; font-size: 15px; }
+.setup-steps li + li { margin-top: 10px; }
+.setup-steps li > span { display: block; }
+.setup-steps .pill { margin-top: 6px; }
+.setup-actions { display: flex; gap: 8px; }
+.setup-open { margin-top: 8px; }
+.setup-open[hidden] { display: none; }
+.wide-select { display: block; width: 100%; margin-top: 8px; text-overflow: ellipsis; }
+.eq-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+.eq-bottom .lowcut { margin-top: 0; }
 .eq-top { margin-bottom: 8px; }
 .eq-top:has(+ #eqBody[hidden]) { margin-bottom: 0; }
 #eqBody[hidden] { display: none; }
@@ -112,6 +128,7 @@ select.current-name option { font-size: 15px; font-weight: 400; background: var(
 .pill:hover { background: #3c3b36; }
 .pill.small { height: 32px; min-width: 0; padding: 0 14px; font-size: 13px; }
 .pill.small:disabled { opacity: .4; cursor: default; }
+.pill.small.holding { background: var(--accent); color: #fff; }
 .pill.small.capturing { background: var(--accent); color: #fff; }
 .pill.listen.on { background: var(--accent); color: #fff; }
 .pill.mute.on { background: var(--red); color: #fff; }
@@ -210,7 +227,7 @@ select {
 .eq-readout button:active { transform: scale(0.97); }
 .lowcut { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: var(--text-2); min-height: 32px; cursor: pointer; }
 .lowcut input { width: 18px; height: 18px; accent-color: var(--accent); }
-.eq.off .eq-tools, .eq.off #eqCurve, .eq.off .lowcut { opacity: .4; }
+.eq.off .eq-tools, .eq.off #eqCurve, .eq.off .eq-bottom { opacity: .4; }
 
 @media (max-width: 860px) {
   #eqCurve { height: 180px; }

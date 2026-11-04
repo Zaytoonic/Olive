@@ -14,6 +14,23 @@
 
   <main>
     <section class="panel controls">
+      <div id="setupCard" class="group setup" hidden>
+        <div class="row">
+          <div class="row-title">Set up Olive for Discord</div>
+          <ol class="setup-steps">
+            <li>
+              <span>Install VB-Audio Virtual Cable: it's how Olive's sound reaches other apps. Restart your PC afterwards.</span>
+              <span id="setupCable" class="hint"></span>
+              <button type="button" id="setupDownload" class="pill small">Open the download page</button>
+            </li>
+            <li><span>In Discord, go to <b>User Settings &gt; Voice &amp; Video</b> and set the input device to <b>CABLE Output</b>.</span></li>
+          </ol>
+          <div class="setup-actions">
+            <button type="button" id="setupCheck" class="pill small">Check again</button>
+            <button type="button" id="setupDone" class="pill small">Done</button>
+          </div>
+        </div>
+      </div>
       <div class="hero group">
         <div class="current">
           <div class="current-text">
@@ -26,6 +43,7 @@
             </div>
             <div id="micNotice" class="hint notice"></div>
             <div id="devStatus" class="hint"></div>
+            <div id="appNotice" class="hint notice"></div>
           </div>
           <div class="current-actions">
             <button id="listenBtn" class="pill listen" aria-pressed="false" title="Hear your mic live (use headphones)">Listen</button>
@@ -37,7 +55,7 @@
           <span>Muted. Nobody can hear you.</span>
         </div>
         <div class="meter-block">
-          <div class="row-head"><span class="caption">Input level</span><span id="levelDb" class="value mono">-∞ dB</span></div>
+          <div class="row-head"><span class="meter-title"><span class="caption">Input level</span><span id="gateChip" class="gate-chip" title="Whether your sound is getting through to other apps"></span></span><span id="levelDb" class="value mono">-∞ dB</span></div>
           <div class="meter">
             <div id="meterFill" class="meter-fill"></div>
             <div id="meterCover" class="meter-cover"></div>
@@ -77,6 +95,7 @@
           <div>
             <div class="row-title">Send to Discord / other apps</div>
             <div class="hint" id="sendHint">Off: other apps hear your raw mic</div>
+            <button type="button" id="setupOpen" class="pill small setup-open" hidden>Show setup steps</button>
             <div class="send-level" id="sendLevel" hidden>
               <div class="mini-meter" title="The level other apps receive"><div class="mini-fill"></div><div class="mini-cover" id="sendCover"></div></div>
               <span class="value mono" id="sendDb">-∞ dB</span>
@@ -90,6 +109,11 @@
             <div class="hint" id="monoHint">Off: stereo mics keep left and right separate</div>
           </div>
           <label class="switch" title="Mix left and right into one channel"><input type="checkbox" id="monoToggle"><span></span></label>
+        </div>
+        <div class="row stack control">
+          <label for="outputSelect" class="row-title">Listen and mute sound play on</label>
+          <select id="outputSelect" class="wide-select" title="Where you hear yourself and the mute sound. Discord doesn't hear either."></select>
+          <div class="hint notice" id="outputHint"></div>
         </div>
       </div>
 
@@ -137,6 +161,26 @@
         </div>
         <div class="row toggle-row">
           <div>
+            <div class="row-title">Push to talk</div>
+            <div class="hint" id="pttHint">Off: your mic is open unless you mute it</div>
+          </div>
+          <div class="row-end">
+            <button type="button" id="pttChange" class="pill small" title="Choose the key or mouse button to hold">Choose key</button>
+            <label class="switch" title="Only send your voice while a key is held"><input type="checkbox" id="pttToggle"><span></span></label>
+          </div>
+        </div>
+        <div class="row toggle-row">
+          <div>
+            <div class="row-title">Updates</div>
+            <div class="hint" id="updateHint">Asks GitHub once a day if there's a new version</div>
+          </div>
+          <div class="row-end">
+            <button type="button" id="updateBtn" class="pill small">Check now</button>
+            <label class="switch" title="Check for new versions automatically"><input type="checkbox" id="updateAuto" checked><span></span></label>
+          </div>
+        </div>
+        <div class="row toggle-row">
+          <div>
             <div class="row-title">Start with Windows</div>
             <div class="hint" id="startupHint">Opens hidden in the tray when you log in</div>
           </div>
@@ -155,6 +199,7 @@
               <span class="eq-title">
                 <span class="row-title">Mic EQ</span>
                 <span class="hint" id="eqFor"></span>
+                <span class="hint notice" id="eqNotice"></span>
               </span>
             </button>
             <div class="eq-head">
@@ -175,7 +220,10 @@
               <div class="eq-chips" id="eqChips" role="tablist" aria-label="EQ bands"></div>
               <div class="eq-readout" id="eqReadout" aria-live="polite"></div>
             </div>
-            <label class="lowcut"><input type="checkbox" id="lowCut"> Low cut (80 Hz) · removes rumble and desk thumps</label>
+            <div class="eq-bottom">
+              <label class="lowcut"><input type="checkbox" id="lowCut"> Low cut (80 Hz) · removes rumble and desk thumps</label>
+              <button type="button" id="eqCompare" class="pill small" disabled title="Turn on Listen, then hold this to hear yourself without the EQ. Discord keeps hearing the EQ.">Hold to compare</button>
+            </div>
           </div>
         </div>
       </div>

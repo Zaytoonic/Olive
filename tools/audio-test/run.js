@@ -56,6 +56,7 @@ async function helperChecks() {
     try {
       const list = await h.call('list');
       const one = await h.call('get', list[0].id);
+      await h.call('ptt', 0);
       const pid = h.proc.pid; h.proc.stdin.end();
       await sleep(800);
       let alive = true; try { process.kill(pid, 0); } catch { alive = false; }
@@ -281,6 +282,11 @@ function pressHotkey(holdRepeats = 0, letterVk = 0x4D) {
     `foreach ($k in ${letterVk},0x12,0x11) { [T.K]::keybd_event($k,0,2,[UIntPtr]::Zero) }`;
   execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore' });
 }
+function pressKey(vk, up) {
+  const ps = "Add-Type -Name K -Namespace T -MemberDefinition '[DllImport(\"user32.dll\")] public static extern void keybd_event(byte v, byte s, uint f, UIntPtr e);';" +
+    `[T.K]::keybd_event(${vk},0,${up ? 2 : 0},[UIntPtr]::Zero)`;
+  execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore' });
+}
 const pageEqStretch = async () => {
   const c = $('eqCurve'); let worst = 1, samples = 0; const t0 = performance.now();
   while (performance.now() - t0 < 1500) {
@@ -423,6 +429,97 @@ async function liveChecks(profile, wav, fixture) {
       });
       check('Classic is the only look, with no picker', !look.picker && !look.attr && !look.saved && look.text === 'rgb(245, 244, 240)' && look.sheets.join() === 'styles.css', `picker: ${look.picker}, stylesheets: ${look.sheets.join()}, text: ${look.text}`);
       check('the window is branded Olive', look.accent === '#6B7F3A' && look.names.every(n => n === 'Olive'), `accent ${look.accent}, title / heading / footer: ${look.names.join(' / ')}`);
+      console.log('\nThe level meter');
+      const meter = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), keep = state.gateAuto, closed = [], chips = new Set();
+        state.gateAuto = true; updateGate();
+        windowHidden = false; syncTicker();
+        const t0 = performance.now();
+        while (performance.now() - t0 < 16000) {
+          await wait(100);
+          if (!meterChain().gateIsOpen) { closed.push(20 * Math.log10(rawAmplitude(meterChain()) + 1e-9)); chips.add($('gateChip').textContent); }
+        }
+        windowHidden = true; syncTicker();
+        state.gateAuto = keep; updateGate();
+        closed.sort((a, b) => a - b);
+        return { samples: closed.length, median: closed[closed.length >> 1], chips: [...chips] };
+      });
+      check('the meter shows the mic even with the gate shut', meter.samples > 5 && meter.median > -55 && meter.median < -32, `median ${f1(meter.median)} dB over ${meter.samples} samples with the gate shut (the file's noise is ${NOISE_DB} dB)`);
+      check('it says the gate is closed', meter.chips.includes('Gate closed'), `showed: ${meter.chips.join(', ')}`);
+
+      console.log('\nEQ limits and compare');
+      const limits = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), keep = snapshotEq(), out = {};
+        eqBandsReset.length = 0;
+        restoreEq({ bands: { presence: { f: 20, g: 9.6, q: 8 }, bass: { f: 112, g: 12, q: 0.7 } } });
+        out.presence = { ...eq.b.presence }; out.bass = { ...eq.b.bass }; out.reset = [...eqBandsReset];
+        selectBand('presence');
+        for (let i = 0; i < 60; i++) $('eqCurve').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }));
+        out.lowest = eq.b.presence.f;
+        selectBand(null);
+        eq.on = true; eq.b.bass.g = 6; applyEq();
+        out.disabledWithoutListen = $('eqCompare').disabled;
+        setMonitor(true); await wait(300);
+        out.enabled = !$('eqCompare').disabled;
+        out.before = eqNodes.bands[0].gain.value;
+        $('eqCompare').dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })); await wait(300);
+        out.held = eqNodes.bands[0].gain.value; out.heldWanted = eq.b.bass.g;
+        $('eqCompare').dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true })); await wait(300);
+        out.after = eqNodes.bands[0].gain.value;
+        setMonitor(false);
+        restoreEq(keep); showEqPreset(); syncEqUi(); eqBandsReset.length = 0;
+        return out;
+      });
+      check('a band saved far out of range goes flat, others stay', limits.presence.f === 4000 && limits.presence.g === 0 && limits.bass.g === 12 && limits.reset.join() === 'Presence', `Presence ${limits.presence.f} Hz ${limits.presence.g} dB, bass ${limits.bass.g} dB`);
+      check('a band can only move within its range', limits.lowest === 1500, `Presence stopped at ${Math.round(limits.lowest)} Hz`);
+      check('compare bypasses the EQ only while held', limits.disabledWithoutListen && limits.enabled && Math.abs(limits.before - 6) < 0.1 && Math.abs(limits.held) < 0.1 && Math.abs(limits.after - 6) < 0.1 && limits.heldWanted === 6, `bass ${f1(limits.before)} -> ${f1(limits.held)} -> ${f1(limits.after)} dB`);
+
+      console.log('\nOutput device');
+      const output = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), out = {};
+        await loadOutputs();
+        const pick = $('outputSelect');
+        out.options = [...pick.options].map(o => o.value);
+        out.cableListed = [...pick.options].some(o => isCableLabel(o.textContent));
+        const real = out.options.find(v => v !== 'default');
+        if (real) {
+          pick.value = real; pick.dispatchEvent(new Event('change', { bubbles: true })); await wait(800);
+          out.ctxSink = audioCtx.sinkId === real; out.soundSink = muteSound.sinkId === real;
+          out.saved = JSON.parse(localStorage.getItem(PREFS_KEY)).outputId === real;
+        }
+        state.outputId = 'not-a-device'; state.outputName = 'Gone speakers';
+        await loadOutputs(); await wait(200);
+        out.goneHint = $('outputHint').textContent; out.goneValue = pick.value; out.goneCtx = audioCtx.sinkId; out.keptName = state.outputName;
+        state.outputId = 'default'; state.outputName = null;
+        await loadOutputs();
+        out.hasReal = !!real;
+        return out;
+      });
+      check('Listen and the mute sound follow the chosen device', !output.hasReal || (output.ctxSink && output.soundSink && output.saved), output.hasReal ? `${output.options.length} outputs, both moved, saved: ${output.saved}` : 'only the default exists here');
+      check('the cable is not offered as a place to listen', !output.cableListed, `${output.options.length} outputs listed`);
+      check('a missing device falls back and says so', output.goneValue === 'default' && output.goneCtx === '' && output.goneHint.includes('Gone speakers') && output.keptName === 'Gone speakers', `"${output.goneHint}"`);
+
+      console.log('\nFirst-run setup');
+      const setup = await copy.call(async () => {
+        const out = {}, realFind = findCable, keepFresh = freshInstall, keepDone = state.setupDone;
+        const shown = () => !$('setupCard').hidden;
+        try {
+          findCable = async () => null; state.setupDone = false; freshInstall = false; await updateSetup();
+          out.noCable = { shown: shown(), text: $('setupCable').textContent, download: !$('setupDownload').hidden };
+          $('setupDone').click(); await new Promise(r => setTimeout(r, 100));
+          out.dismissed = { shown: shown(), reopen: !$('setupOpen').hidden, saved: JSON.parse(localStorage.getItem(PREFS_KEY)).setupDone };
+          findCable = async () => ({ deviceId: 'x' }); state.setupDone = false; freshInstall = true; await updateSetup();
+          out.freshWithCable = { shown: shown(), download: !$('setupDownload').hidden };
+          state.setupDone = false; freshInstall = false; await updateSetup();
+          out.upgradeWithCable = { shown: shown(), done: state.setupDone };
+        } finally { findCable = realFind; freshInstall = keepFresh; state.setupDone = keepDone; await updateSetup(); }
+        return out;
+      });
+      check('no cable: the steps show, with a download button', setup.noCable.shown && setup.noCable.download && /Not found/.test(setup.noCable.text), `"${setup.noCable.text}"`);
+      check('dismissed: stays hidden but can be reopened, and is saved', !setup.dismissed.shown && setup.dismissed.reopen && setup.dismissed.saved === true, `reopen button: ${setup.dismissed.reopen}`);
+      check('a new install with a cable still gets the Discord step', setup.freshWithCable.shown && !setup.freshWithCable.download, 'no download button');
+      check('an existing user with a cable is not bothered', !setup.upgradeWithCable.shown && setup.upgradeWithCable.done, 'stays hidden');
+
       console.log('\nEQ dropdown and scrolling');
       const eqUi = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), out = { startsClosed: $('eqBody').hidden && state.eqOpen === false && $('eqExpand').getAttribute('aria-expanded') === 'false' };
@@ -519,6 +616,26 @@ async function liveChecks(profile, wav, fixture) {
       await sleep(300);
       const off = await copy.call(pageOutPeak, 14);
       check('muting silences the output', off < -90, `output peak ${f1(off)} dB`);
+      await copy.call(() => toggleMute());
+      const TALK_KEY = 0x87;                             // F24, which nothing on a normal keyboard uses
+      try {
+        const chosen = await copy.call(k => { state.gateAuto = false; state.gateDb = -60; updateGate(); state.ptt = true; state.pttKey = { vk: k, label: 'F24' }; return applyPtt().then(() => $('pttHint').textContent); }, TALK_KEY);
+        await sleep(800);
+        const released = await copy.call(pageOutPeak, 14);
+        pressKey(TALK_KEY, false); await sleep(120);
+        const held = await copy.call(pageOutPeak, 14);
+        const wasOpen = await copy.call(() => pttOpen);
+        pressKey(TALK_KEY, true); await sleep(600);
+        const after = await copy.call(pageOutPeak, 14);
+        const closedAgain = await copy.call(() => pttOpen);
+        check('push to talk: silent until the key is held', released < -90, `output peak ${f1(released)} dB ("${chosen}")`);
+        check('push to talk: sound flows while it is held', held > -50 && wasOpen, `output peak ${f1(held)} dB`);
+        check('push to talk: silent again after release', after < -90 && !closedAgain, `output peak ${f1(after)} dB`);
+      } finally {
+        pressKey(TALK_KEY, true);
+        await copy.call(() => { state.ptt = false; state.pttKey = null; return applyPtt(); });
+      }
+      await copy.call(() => toggleMute());
       const sound = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), out = { duration: muteSound.duration };
         toggleMute(); await wait(100);
@@ -613,10 +730,25 @@ async function liveChecks(profile, wav, fixture) {
   }
 }
 
+// ---- The update check, against made-up GitHub replies ----
+async function updateChecks() {
+  console.log('\nUpdate check');
+  const { isNewer, checkForUpdate } = require(path.join(ROOT, 'src', 'main', 'updates.js'));
+  const url = 'https://github.com/Zaytoonic/olive/releases/tag/v1.7.0';
+  const reply = (status, body) => async () => ({ ok: status < 400, status, json: async () => body });
+  check('versions compare as numbers', isNewer('v1.10.0', '1.9.0') && !isNewer('1.6.0', '1.6.0') && !isNewer('1.5.9', '1.6.0') && !isNewer('nonsense', '1.6.0'), '1.10 is newer than 1.9');
+  const found = await checkForUpdate('1.6.0', reply(200, { tag_name: 'v1.7.0', html_url: url }));
+  check('a newer release is reported', found.status === 'available' && found.version === '1.7.0' && found.url === url, `${found.status} ${found.version}`);
+  check('the same version is not', (await checkForUpdate('1.7.0', reply(200, { tag_name: 'v1.7.0', html_url: url }))).status === 'current', 'current');
+  check('a release link off the repo is refused', (await checkForUpdate('1.6.0', reply(200, { tag_name: 'v1.7.0', html_url: 'https://example.com/x' }))).status === 'unavailable', 'unavailable');
+  const failures = await Promise.all([reply(404, {}), reply(500, {}), async () => { throw new Error('offline'); }].map(f => checkForUpdate('1.6.0', f)));
+  check('failures give a reason instead of crashing', failures.every(r => r.status === 'unavailable' && r.reason), failures.map(r => r.reason).join(' / '));
+}
+
 // ---- From the old name: real saved settings in an old folder, opened by a real copy of the app under the new one ----
 async function renameChecks(dir, wav) {
   console.log('\nMoving from the old name');
-  const { migrateSettings, moveLoginEntry, reg, RUN, APPROVED } = require(path.join(ROOT, 'src', 'main', 'migrate.js'));
+  const { migrateSettings, moveLoginEntry, repairLoginEntry, reg, RUN, APPROVED } = require(path.join(ROOT, 'src', 'main', 'migrate.js'));
   const root = path.join(dir, 'appdata'), oldDir = path.join(root, 'mic-manager'), newDir = path.join(root, 'olive');
   fs.mkdirSync(root);
   check('nothing to move on a fresh install', migrateSettings(oldDir, path.join(dir, 'fresh')) === 'none', 'no old folder, nothing copied');
@@ -626,7 +758,7 @@ async function renameChecks(dir, wav) {
     await copy.connect();
     await copy.call(pageReady);
     await copy.call(() => {
-      state.compAmount = 37; eq.b.bass.g = -7; state.eqOpen = true;
+      state.compAmount = 37; eq.b.bass.g = -7; state.eqOpen = true; sendWanted = false;
       savePrefs();
       localStorage.setItem(OLD_PREFS_KEY, localStorage.getItem(PREFS_KEY));
       localStorage.removeItem(PREFS_KEY);
@@ -648,8 +780,9 @@ async function renameChecks(dir, wav) {
   try {
     await copy.connect();
     await copy.call(pageReady);
-    const got = await copy.call(() => ({ comp: state.compAmount, bass: eq.b.bass.g, eqOpen: state.eqOpen, oldKey: localStorage.getItem(OLD_PREFS_KEY) !== null, newKey: localStorage.getItem(PREFS_KEY) !== null }));
+    const got = await copy.call(() => ({ send: state.send, sendBox: $('sendToggle').checked, comp: state.compAmount, bass: eq.b.bass.g, eqOpen: state.eqOpen, oldKey: localStorage.getItem(OLD_PREFS_KEY) !== null, newKey: localStorage.getItem(PREFS_KEY) !== null }));
     check('settings and EQ come across', got.comp === 37 && got.bass === -7 && got.eqOpen === true, `compressor ${got.comp}, bass ${got.bass}, EQ open ${got.eqOpen}`);
+    check('Send to Discord stays off after a restart', got.send === false && got.sendBox === false, `send: ${got.send}, switch: ${got.sendBox}`);
     check('they move to the new settings name', got.newKey && !got.oldKey, `new: ${got.newKey}, old: ${got.oldKey}`);
     const salt = d => { try { return JSON.parse(fs.readFileSync(path.join(d, 'Preferences'), 'utf8')).electron.media.device_id_salt; } catch { return null; } };
     check('saved mic IDs stay valid', salt(newDir) === SALT, `salt came across: ${salt(newDir) === SALT}`);
@@ -657,6 +790,9 @@ async function renameChecks(dir, wav) {
   await sleep(2000);
   check('the old folder is left alone', fs.existsSync(path.join(oldDir, 'Local Storage')), 'still there');
   check('existing settings are never overwritten', migrateSettings(oldDir, newDir) === 'exists', 'second run copies nothing');
+
+  fs.writeFileSync(path.join(dir, 'a-file'), '');
+  check('a failed copy is reported, not hidden', migrateSettings(oldDir, path.join(dir, 'a-file', 'olive')) === 'failed', 'returns failed');
 
   // The login entry, using a fake name and a path that doesn't exist, so the real entry is never touched.
   const fake = 'Olive test entry (safe to delete)';
@@ -669,6 +805,12 @@ async function renameChecks(dir, wav) {
     let asked = null;
     const moved = moveLoginEntry(enabled => { asked = enabled; return true; }, fake);
     check('the login entry moves, and stays off if it was off', moved === 'moved-off' && asked === false && !exists(RUN) && !exists(APPROVED), `${moved}, old entry there: ${exists(RUN) || exists(APPROVED)}`);
+    reg('add', RUN, '/v', fake, '/t', 'REG_SZ', '/d', '"C:\\does-not-exist.exe" --hidden', '/f');
+    let repairedOn = null;
+    check('a login entry pointing at nothing gets repaired', repairLoginEntry('C:\\new\\Olive.exe', e => { repairedOn = e; return true; }, fake) === 'repaired' && repairedOn === true, 'repaired');
+    reg('add', RUN, '/v', fake, '/t', 'REG_SZ', '/d', `"${process.execPath}" --hidden`, '/f');
+    check('a login entry for a copy that exists is left alone', repairLoginEntry('C:\\new\\Olive.exe', () => { throw new Error('should not run'); }, fake) === 'fine', 'fine');
+    reg('delete', RUN, '/v', fake, '/f');
     check('no old login entry: nothing happens', moveLoginEntry(() => { throw new Error('should not run'); }, fake) === 'none', 'none');
   } finally {
     reg('delete', RUN, '/v', fake, '/f');
@@ -687,7 +829,7 @@ async function renameChecks(dir, wav) {
     if (wanted('nr')) { voiceChecks(); offlineChecks(); }
     if (wanted('gate')) gateChecks(fixture);
     await liveChecks(path.join(dir, 'profile'), wav, fixture);
-    if (wanted('app')) await renameChecks(dir, wav);
+    if (wanted('app')) { await renameChecks(dir, wav); await updateChecks(); }
   } catch (err) {
     check('test run finished', false, err.message);
   }
