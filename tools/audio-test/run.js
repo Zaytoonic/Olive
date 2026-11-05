@@ -627,7 +627,9 @@ async function liveChecks(profile, wav, fixture) {
       console.log('\nWhole chain, 30 s of noise and speech: noise reduction 100%, compressor on');
       await copy.call(s => { state.nr = true; state.nrAmount = s; applyNr(); }, 100);
       await sleep(7000);                 // the gate's noise floor has a 6 s memory
-      const g = analyseGate(await copy.call(pageCapture, 30), fixture);
+      const cap = await copy.call(pageCapture, 30);
+      check('the audio clock keeps up after an output device was chosen', cap.n >= 30 * cap.sr * 0.98, `${cap.n} of ${30 * cap.sr} samples in 30 s`);
+      const g = analyseGate(cap, fixture);
       const placed = Math.abs(g.micNoise - NOISE_DB) < 3 && g.voice[-25].mic > g.voice[-35].mic + 5 && g.voice[-35].mic > g.voice[-42].mic + 2;
       check('capture lines up with the test file', placed, `mic levels: noise ${f1(g.micNoise)}, speech ${[-25, -35, -42].map(l => f1(g.voice[l].mic)).join(' / ')} dB`);
       console.log(`        noise going in ${f1(g.micNoise)} dB, coming out ${f1(g.noise.endLevel)} dB`);

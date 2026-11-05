@@ -397,6 +397,11 @@ function audioCtxInit() {
   try {
     audioCtx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
     eqNodes = buildChain(audioCtx);       // its analyser (~21 ms per reading) also drives the level meter
+    // After setSinkId, 30 s of pure silence slows this context's clock to about 72%. A signal far too quiet to hear (-140 dB) keeps it at full speed.
+    const keepClock = audioCtx.createConstantSource();
+    keepClock.offset.value = 1e-7;
+    keepClock.connect(audioCtx.destination);
+    keepClock.start();
   } catch (err) { audioCtx = null; eqNodes = null; console.error('Audio engine unavailable:', err); }
 }
 // One processing chain: noise reduction -> [mono] EQ -> volume -> gate -> output level -> this context's output device.
