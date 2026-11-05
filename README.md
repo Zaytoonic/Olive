@@ -1,6 +1,7 @@
 <p align="center"><img src="assets/olive-icon-1024.png" width="96" alt="Olive icon"></p>
 <h1 align="center">Olive</h1>
 <p align="center">A microphone manager for Windows, inspired by SteelSeries Sonar's mic tab.</p>
+<p align="center"><a href="https://github.com/Zaytoonic/Olive/releases/latest"><strong>Download the latest version</strong></a></p>
 
 ![The Olive window](docs/screenshot.png)
 
@@ -15,7 +16,7 @@
 - **Runs in the tray**, and can start with Windows.
 
 ## Installing
-Run `Olive-Setup-<version>.exe`. It installs for your Windows account, with no admin rights needed, and adds a Start menu shortcut and an uninstaller. The app is not code-signed yet, so Windows may say "Windows protected your PC": click **More info**, then **Run anyway**.
+Download `Olive-Setup-<version>.exe` from [Releases](https://github.com/Zaytoonic/Olive/releases/latest) and run it. It installs for your Windows account, with no admin rights needed, and adds a Start menu shortcut and an uninstaller. The app is not code-signed yet, so Windows may say "Windows protected your PC": click **More info**, then **Run anyway**.
 
 Olive checks GitHub once a day for a new version and tells you if there is one. It never downloads or installs anything by itself, and you can turn the check off.
 
