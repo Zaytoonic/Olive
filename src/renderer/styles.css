@@ -35,11 +35,6 @@ button, select, input { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--hairline);
 }
 h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.badge {
-  font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 9999px;
-  background: var(--tile); color: var(--text-2);
-}
-.badge.live { display: none; }               /* only show the badge when something is off (mock audio) */
 
 .icon-btn {
   width: 44px; height: 44px; border-radius: 9999px; border: 0; background: transparent;

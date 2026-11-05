@@ -1,14 +1,7 @@
-const MOCK_DEVICES = [
-  { id: 'mic-1', name: 'USB Condenser Microphone', isDefault: true, noise: 0.012, voice: 0.55 },
-  { id: 'mic-2', name: 'Headset Microphone', noise: 0.03, voice: 0.4 },
-  { id: 'mic-3', name: 'Webcam Microphone', noise: 0.045, voice: 0.3 },
-  { id: 'mic-4', name: 'Realtek Microphone Array', noise: 0.06, voice: 0.35 }
-];
-
-let devices = MOCK_DEVICES;
+let devices = [], devicesChecked = false;
 let live = false;            // true when devices come from the system
 const state = {
-  deviceId: MOCK_DEVICES.find(d => d.isDefault).id,
+  deviceId: null,
   volume: 75, muted: false, gateDb: -45, gateAuto: true,
   nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M', eqOpen: false,
   ptt: false, pttKey: null, outputId: 'default', outputName: null, setupDone: false, updateAuto: true
@@ -23,6 +16,8 @@ const ampToDb = a => (a <= 0 ? -Infinity : 20 * Math.log10(a));
 function renderDevices() {
   const pick = $('micSelect');
   pick.innerHTML = '';
+  pick.disabled = !devices.length;
+  if (!devices.length) pick.add(new Option(devicesChecked ? 'No microphone found' : 'Looking for microphones…', ''));
   for (const d of devices) pick.add(new Option(d.name, d.id, false, d.id === state.deviceId));
   $('micNotice').textContent = live && prefDeviceName && !preferredDevice()
     ? `${prefDeviceName} isn't connected. Using ${currentDevice().name} until it's back.` : '';
@@ -38,7 +33,7 @@ function selectDevice(id) {
   applySysToUi();
   if (live) startCapture();
 }
-const currentDevice = () => devices.find(d => d.id === state.deviceId) || devices[0];
+const currentDevice = () => devices.find(d => d.id === state.deviceId) || devices[0] || null;
 // The mic you chose, if it's connected right now. Device IDs can change between launches, so its name counts too.
 function preferredDevice() {
   const byId = devices.find(d => d.id === prefDeviceId);
@@ -229,45 +224,26 @@ function updateHints() {
   $('compVal').textContent = state.comp ? state.compAmount + '%' : 'Off';
   $('monVal').textContent = state.monitor ? state.monitorVol + '%' : 'Off';
   $('nrHint').textContent = !state.nr ? 'Off: nothing is removed'
-    : !live ? 'Simulated (mock mode)'
     : chains().some(ch => ch.nrFailed) ? 'Unavailable: the noise reduction engine could not start'
     : chains().some(ch => ch.voiceFailed) ? "Using the backup noise reduction: the voice engine couldn't start"
     : 'Lowers fans, rumble and hiss. Turn it down to mix your natural sound back in';
   $('monHint').textContent = !state.monitor ? "You won't hear yourself"
     : analyser ? 'Use headphones to avoid echo'
-    : live ? 'On · microphone not open, nothing to play'
-    : 'On · mock mode has no real mic to play';
+    : 'On · microphone not open, nothing to play';
 }
 
-// ---- Simulated signal ----
-// Speech-like bursts (syllables inside phrases) on top of a device-specific noise floor.
-let t = 0, phraseOn = false, phraseLeft = 0, smoothed = MIN_DB, peak = MIN_DB, peakHold = 0;
-function simulateAmplitude(dt) {
-  const d = currentDevice();
-  t += dt;
-  phraseLeft -= dt;
-  if (phraseLeft <= 0) { phraseOn = !phraseOn; phraseLeft = phraseOn ? 1 + Math.random() * 2.5 : 0.6 + Math.random() * 1.8; }
-
-  let voice = 0;
-  if (phraseOn) {
-    const syllable = Math.max(0, Math.sin(t * 2 * Math.PI * 4.2)) ** 2;   // ~4 syllables/s
-    voice = d.voice * (0.35 + 0.65 * syllable) * (0.8 + Math.random() * 0.4);
-  }
-  let noise = d.noise * (0.6 + Math.random() * 0.8);
-  if (state.nr) noise *= 1 - 0.95 * (state.nrAmount / 100);
-  return voice + noise;
-}
-
+// ---- Level meter ----
+let smoothed = MIN_DB, peak = MIN_DB, peakHold = 0;
 let last = performance.now();
 function tick() {
   // Hidden with the audio-thread gate on every chain: nothing to do on this thread at all.
   if (isHidden() && analyser && eqNodes.gate && (!sendNodes || sendNodes.gate)) { last = performance.now(); return; }
   const now = performance.now();
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
-  const raw = analyser ? rawAmplitude(meterChain()) : simulateAmplitude(dt) * eqLevelFactor();
+  const raw = analyser ? rawAmplitude(meterChain()) : 0;
   let db = ampToDb(raw * volFactor());                       // in-app: 75% = unity
-  let open;
-  if (!analyser) { trackFloor(raw * volFactor(), dt); open = db >= gateDbNow(); }
+  let open = false;
+  if (!analyser) { /* no mic open, so nothing to measure */ }
   else if (meterChain().gate) open = meterChain().gateIsOpen;
   else open = gateChain(meterChain(), liveAmplitude(), now);
   if (sendNodes && !sendNodes.gate && meterChain() !== sendNodes) gateChain(sendNodes, sendSrc ? chainAmplitude(sendNodes) : 0, now);
@@ -310,7 +286,7 @@ document.addEventListener('visibilitychange', () => syncTicker());
 let shownChip = null;
 function drawGateChip(open) {
   const closedByKey = state.ptt && !pttOpen;
-  const text = state.muted ? '' : closedByKey ? (state.pttKey ? `Hold ${state.pttKey.label} to talk` : 'Choose a talk key') : open ? 'Gate open' : 'Gate closed';
+  const text = state.muted || !analyser ? '' : closedByKey ? (state.pttKey ? `Hold ${state.pttKey.label} to talk` : 'Choose a talk key') : open ? 'Gate open' : 'Gate closed';
   if (text === shownChip) return;
   shownChip = text;
   const chip = $('gateChip');
@@ -477,13 +453,6 @@ function applyEqTo(ch) {
   ch.hp.type = cut ? 'highpass' : 'lowshelf';
   ch.hp.frequency.value = 80;
   ch.hp.gain.value = 0;
-}
-// Rough gain the EQ adds to a voice-like signal, used to move the simulated meter.
-function eqLevelFactor() {
-  if (!eq.on) return 1;
-  const g = k => eq.b[k].g;
-  const db = 0.2 * g('bass') + 0.2 * g('lowmid') + 0.25 * g('mid') + 0.15 * g('presence') + 0.1 * g('brilliance') + 0.1 * g('air') - (eq.lowCut ? 0.5 : 0);
-  return Math.pow(10, db / 20);
 }
 function eqEdited() {
   $('eqPreset').value = 'custom';
@@ -940,7 +909,7 @@ async function startCapture() {
     updateHints();
   } catch (err) {
     if (token !== captureToken) return;
-    setStatus(micError(err) + ' Showing a simulated level.');
+    setStatus(micError(err));
     updateHints();
   }
 }
@@ -974,25 +943,22 @@ async function loadDevices() {
     found = inputs.filter(d => d.deviceId !== 'default').map(d => ({
       id: d.deviceId,
       name: d.label.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)$/i, '') || 'Microphone',
-      noise: 0.02, voice: 0.45,
       isDefault: d.label === defaultLabel
     }));
   } catch (err) {
-    setStatus(micError(err) + ' Showing example microphones.');
+    if (err.name !== 'NotFoundError') setStatus(micError(err));   // the dropdown already says none was found
   }
 
   live = found.length > 0;
-  devices = live ? found : MOCK_DEVICES;
-  if (!live && !$('devStatus').textContent) setStatus('No microphones found. Showing example microphones.');
+  devices = found;
+  devicesChecked = true;
+  if (!live && !$('devStatus').textContent) setStatus('Plug in a microphone, then press refresh.');
   // Your chosen mic whenever it's connected, so plugging it back in returns to it; otherwise stay put, or use the default.
   const wanted = preferredDevice();
   if (wanted) state.deviceId = wanted.id;
-  else if (!devices.some(d => d.id === state.deviceId)) state.deviceId = (devices.find(d => d.isDefault) || devices[0]).id;
+  else if (live && !devices.some(d => d.id === state.deviceId)) state.deviceId = (devices.find(d => d.isDefault) || devices[0]).id;
   if (live) switchEqTo(currentDevice().name);
 
-  const badge = $('sourceBadge');
-  badge.textContent = live ? 'Live input' : 'Mock audio';
-  badge.classList.toggle('live', live);
   renderDevices();
   updateHints();
   if (!live) stopCapture();
@@ -1094,7 +1060,7 @@ async function setSend(on) {
     }
     state.send = true;
     updateSendGain();
-    if (live) updateSendStatus(); else sendHint('On · but mock mode has no real mic to send', 'warn');
+    if (live) updateSendStatus(); else sendHint('On · but there is no microphone to send', 'warn');
   } catch (err) {
     if (token !== sendToken) return;
     state.send = false; teardownSend();
@@ -1174,7 +1140,7 @@ function applySysToUi() {
     hint.title = '';
     $('volume').title = 'Sets the Windows mic level and mute · affects all apps';
   } else {
-    hint.textContent = !live ? 'Simulated (mock mode)'
+    hint.textContent = !live ? 'No microphone'
       : sysStatus === 'connecting' ? 'Connecting to Windows audio…'
       : sysStatus === 'ready' ? "In this app only · couldn't match this mic to a Windows device"
       : sysStatus === 'error' ? 'In this app only · Windows control unavailable'
@@ -1277,16 +1243,6 @@ function loadPrefs() {
 }
 let eqPresetPref = 'flat';
 
-// One time only: switch to the EQ + compressor tuned from your recording. Afterwards it's just a preset.
-function applyTunedOnce(p) {
-  if (p && p.tunedVoice === 1) return;
-  applyPreset(EQ_PRESETS.myvoice);
-  eq.on = true;
-  eqPresetPref = 'myvoice';
-  state.comp = true;
-  state.compAmount = 75;
-}
-
 // Put restored values into the controls (before their listeners are attached).
 function showPrefsInUi() {
   $('volume').value = state.volume; $('volumeVal').textContent = state.volume + '%';
@@ -1304,7 +1260,7 @@ function showPrefsInUi() {
 function savePrefs() {
   clearTimeout(saveTimer); saveTimer = null;
   const p = {
-    deviceId: prefDeviceId, deviceName: prefDeviceName, volume: state.volume, gateDb: state.gateDb, gateAuto: state.gateAuto, mono: state.mono, tunedVoice: 1,
+    deviceId: prefDeviceId, deviceName: prefDeviceName, volume: state.volume, gateDb: state.gateDb, gateAuto: state.gateAuto, mono: state.mono,
     nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol, send: sendWanted,
     ptt: state.ptt, pttKey: state.pttKey, outputId: state.outputId, outputName: state.outputName, setupDone: state.setupDone, updateAuto: state.updateAuto,
     comp: state.comp, compAmount: state.compAmount, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel, eqOpen: state.eqOpen,
@@ -1623,7 +1579,6 @@ async function initStartup() {
 // ---- Init ----
 const savedPrefs = loadPrefs();
 freshInstall = !savedPrefs;
-applyTunedOnce(savedPrefs);
 showPrefsInUi();
 renderDevices();
 $('micSelect').addEventListener('change', e => selectDevice(e.target.value));

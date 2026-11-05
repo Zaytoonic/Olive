@@ -370,6 +370,9 @@ async function liveChecks(profile, wav, fixture) {
     check('nothing reaches the real cable', info.sendConnected === false, `send chain connected: ${info.sendConnected}`);
 
     if (wanted('app')) {
+      console.log('\nA new install');
+      const fresh = await copy.call(() => ({ gains: EQ_BANDS.map(d => eq.b[d.key].g), preset: $('eqPreset').value, comp: state.comp }));
+      check('a new install starts flat, with the compressor off', fresh.gains.every(g => g === 0) && fresh.preset === 'flat' && fresh.comp === false, `gains ${fresh.gains.join()}, preset ${fresh.preset}, compressor ${fresh.comp}`);
       console.log('\nStart with Windows');
       const startup = await copy.call(async () => ({ api: await window.appStartup.get(), disabled: $('startupToggle').disabled, hint: $('startupHint').textContent }));
       check('a copy run from source cannot register itself at login', startup.api.supported === false && startup.disabled, `toggle disabled: ${startup.disabled}, hint: "${startup.hint}"`);
@@ -429,6 +432,32 @@ async function liveChecks(profile, wav, fixture) {
       });
       check('Classic is the only look, with no picker', !look.picker && !look.attr && !look.saved && look.text === 'rgb(245, 244, 240)' && look.sheets.join() === 'styles.css', `picker: ${look.picker}, stylesheets: ${look.sheets.join()}, text: ${look.text}`);
       check('the window is branded Olive', look.accent === '#6B7F3A' && look.names.every(n => n === 'Olive'), `accent ${look.accent}, title / heading / footer: ${look.names.join(' / ')}`);
+      console.log('\nNo microphone');
+      const none = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), md = navigator.mediaDevices, realList = md.enumerateDevices.bind(md), out = {};
+        const read = () => ({ options: [...$('micSelect').options].map(o => o.textContent), disabled: $('micSelect').disabled, status: $('devStatus').textContent, level: $('levelDb').textContent, chip: $('gateChip').textContent, capturing: !!stream });
+        const fail = name => { md.getUserMedia = async () => { throw new DOMException('test', name); }; };
+        try {
+          md.enumerateDevices = async () => (await realList()).filter(d => d.kind !== 'audioinput');
+          fail('NotFoundError');
+          await loadDevices(); await wait(500);
+          out.missing = read();
+          fail('NotAllowedError');
+          await loadDevices(); await wait(300);
+          out.blocked = read();
+        } finally {
+          delete md.enumerateDevices; delete md.getUserMedia;
+          await loadDevices(); await wait(1000);
+        }
+        out.back = read();
+        out.backMeter = rawAmplitude(meterChain()) > 0;
+        return out;
+      });
+      check('no mic: the list says so, with no made-up mics', none.missing.options.join() === 'No microphone found' && none.missing.disabled && !none.missing.capturing, `list: ${none.missing.options.join()}, disabled: ${none.missing.disabled}`);
+      check('no mic: it says what to do, and the meter is silent', /Plug in/.test(none.missing.status) && /∞/.test(none.missing.level) && none.missing.chip === '', `"${none.missing.status}", meter ${none.missing.level}, chip "${none.missing.chip}"`);
+      check('mic access blocked: Windows privacy is named', /Privacy/.test(none.blocked.status) && none.blocked.options.join() === 'No microphone found', `"${none.blocked.status}"`);
+      check('a mic coming back starts working again', none.back.capturing && !none.back.disabled && none.back.options[0] !== 'No microphone found' && none.backMeter, `${none.back.options.length} mics, capturing: ${none.back.capturing}, signal: ${none.backMeter}`);
+
       console.log('\nThe level meter');
       const meter = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), keep = state.gateAuto, closed = [], chips = new Set();
@@ -543,6 +572,7 @@ async function liveChecks(profile, wav, fixture) {
       console.log('\nStart-up and recovery');
       const retry = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        startupRetries = 0;   // every earlier rescan used up a try, and this test needs some left
         navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('not ready', 'AbortError'); };
         await loadDevices();
         const during = { live, status: $('devStatus').textContent, retrying: startupRetries > 0 };
