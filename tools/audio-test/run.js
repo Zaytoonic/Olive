@@ -3,10 +3,12 @@
 // Runs a separate hidden, muted copy of the app with its own temporary settings folder and a fake microphone
 // that plays a generated file. Your running app, your settings, your mic and the virtual cable are not touched.
 // The rename check adds a fake login entry to Windows for a moment, then removes it.
-// During the EQ check its window opens briefly; a tray icon shows while it runs. Takes about 3 minutes.
+// During the EQ check its window opens briefly, and during the mute check a "Muted" badge shows in the corners of the
+// screen for a few seconds; a tray icon shows while it runs. Takes about 4 minutes.
 // Exit code 1 if any check fails. To run one part: npm run test:audio -- nr | gate | mute | eq | app
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const path = require('path');
 const vm = require('vm');
 const { spawn, execFileSync } = require('child_process');
@@ -212,6 +214,20 @@ class Copy {
     try { if (this.ws) this.ws.close(); } catch {}
     try { execFileSync('taskkill', ['/PID', String(this.proc.pid), '/T', '/F'], { stdio: 'ignore' }); } catch {}
   }
+}
+
+// Evaluates an expression in another page of the test copy (like the muted badge). null if there's no such page.
+async function evalIn(match, expression) {
+  const t = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x => x.type === 'page' && match.test(x.url));
+  if (!t) return null;
+  const ws = new WebSocket(t.webSocketDebuggerUrl);
+  await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+  const r = await new Promise(res => {
+    ws.onmessage = m => { const d = JSON.parse(m.data); if (d.id === 1) res(d.result); };
+    ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true } }));
+  });
+  ws.close();
+  return r && r.result ? r.result.value : null;
 }
 
 // ---- Runs inside the page ----
@@ -613,6 +629,64 @@ async function liveChecks(profile, wav, fixture) {
       check('while sending, the second engine sleeps and the meter still reads', chainUse.sending.main === 'suspended' && chainUse.sending.send === 'running' && chainUse.sending.meterIsSend && chainUse.sending.level > -70, `second engine ${chainUse.sending.main}, sending engine ${chainUse.sending.send}, meter ${f1(chainUse.sending.level)} dB`);
       check('Listen wakes it, and it sleeps again', chainUse.listening.main === 'running' && chainUse.listening.meterIsMain && chainUse.listening.level > -70 && chainUse.back === 'suspended', `with Listen ${chainUse.listening.main}, meter ${f1(chainUse.listening.level)} dB; afterwards ${chainUse.back}`);
       check('it runs again when sending stops', chainUse.after.main === 'running' && chainUse.after.meterIsMain && chainUse.after.level > -70, `${chainUse.after.main}, meter ${f1(chainUse.after.level)} dB`);
+
+      console.log('\nMic test');
+      // Gate wide open and noise reduction off, so the file's background noise counts as sound whatever part of it plays.
+      const micTestRun = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), out = {};
+        clearTimeout(startupRetryTimer); startupRetries = 99;
+        state.nr = false; applyNr(); state.gateAuto = false; state.gateDb = -60; updateGate();
+        setMonitor(true); await wait(1500);
+        out.enabled = !$('testBtn').disabled;
+        $('testBtn').click(); await wait(400);
+        out.recording = !!micTest && micTest.phase === 'recording' && /^Recording/.test($('testBtn').textContent);
+        out.listenWhileRecording = eqNodes.outGain.gain.value;
+        await wait(5200);
+        const t = micTest;
+        out.playing = !!t && t.phase === 'playing';
+        out.seconds = t && t.seconds; out.peak = t && t.peakDb;
+        out.ownOutput = !!(t && t.src && t.src.context === audioCtx);
+        await wait(300);
+        out.listenWhilePlaying = eqNodes.outGain.gain.value;
+        $('testBtn').click(); await wait(300);
+        out.stopped = !micTest && $('testBtn').textContent === 'Test mic';
+        out.listenAfter = eqNodes.outGain.gain.value;
+        // Muted: it still records, and nothing leaves Olive meanwhile
+        toggleMute(); await wait(300);
+        $('testBtn').click(); await wait(400);
+        out.mutedHint = $('testHint').textContent; out.mutedOut = eqNodes.outGain.gain.value;
+        await wait(5200);
+        out.mutedPeak = micTest && micTest.peakDb;
+        if (micTest) endMicTest(micTest, '');
+        toggleMute();
+        // The gate shut the whole time: it says so
+        state.gateDb = -10; updateGate(); await wait(800);
+        $('testBtn').click(); await wait(5600);
+        out.shutHint = $('testHint').textContent;
+        if (micTest) endMicTest(micTest, '');
+        setMonitor(false);
+        // While sending: recorded from the sending engine, played on your output, and that engine sleeps again afterwards
+        state.gateDb = -60; updateGate();
+        const ctx = new AudioContext({ sampleRate: 48000 }); sendCtx = ctx; sendNodes = buildChain(ctx); connectSendSource(); syncChains();
+        await wait(2500);
+        $('testBtn').click(); await wait(5500);
+        const s = micTest;
+        out.sendRecordedFrom = s && s.ch === sendNodes; out.sendPlayedOn = s && s.src && s.src.context === audioCtx; out.sendPeak = s && s.peakDb;
+        out.mainWhilePlaying = audioCtx.state;
+        if (s) endMicTest(s, '');
+        await wait(500);
+        out.mainAfter = audioCtx.state;
+        teardownSend(); await wait(500);
+        state.nr = true; applyNr(); state.gateAuto = true; updateGate();
+        return out;
+      });
+      const mt = micTestRun;
+      check('Test mic records 5 s of the processed sound', mt.enabled && mt.recording && mt.playing && Math.abs(mt.seconds - 5) < 0.25 && mt.peak > -50, `${f1(mt.seconds)} s recorded, peak ${f1(mt.peak)} dB`);
+      check('it plays back on your output, with Listen quiet meanwhile', mt.ownOutput && mt.listenWhileRecording > 0.5 && mt.listenWhilePlaying < 0.01 && mt.listenAfter > 0.5, `Listen ${mt.listenWhileRecording.toFixed(2)} -> ${mt.listenWhilePlaying.toFixed(3)} -> ${mt.listenAfter.toFixed(2)}`);
+      check('Stop ends it', mt.stopped, `stopped: ${mt.stopped}`);
+      check('it works while muted, and nothing leaves Olive', mt.mutedPeak > -50 && /muted/.test(mt.mutedHint) && mt.mutedOut < 0.001, `peak ${f1(mt.mutedPeak)} dB, output level ${mt.mutedOut}, "${mt.mutedHint}"`);
+      check('it says so when nothing got through the gate', /Nothing got through/.test(mt.shutHint), `"${mt.shutHint}"`);
+      check('while sending: recorded from the sending engine, never played into it', mt.sendRecordedFrom && mt.sendPlayedOn && mt.sendPeak > -50 && mt.mainWhilePlaying === 'running' && mt.mainAfter === 'suspended', `peak ${f1(mt.sendPeak)} dB; your output engine ${mt.mainWhilePlaying} while playing, ${mt.mainAfter} after`);
     }
 
     if (wanted('nr')) console.log('\nNoise reduction slider');
@@ -682,6 +756,45 @@ async function liveChecks(profile, wav, fixture) {
       });
       check('each way has its own short sound, and a new one cuts off the last', sound.durations.every(d => d > 0.2 && d < 1) && sound.unmuteOnUnmute && sound.muteOnMute && sound.muteCutOff, `${sound.durations.map(f1).join(' s and ')} s long, unmute: ${sound.unmuteOnUnmute}, mute: ${sound.muteOnMute}, cut off: ${sound.muteCutOff}`);
       await copy.call(() => toggleMute());
+      // The sound settings, through the real controls
+      const soundSet = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), fire = (el, type) => el.dispatchEvent(new Event(type, { bubbles: true }));
+        const s = $('soundVol'), sw = $('soundToggle'), out = {};
+        s.value = 50; fire(s, 'input'); fire(s, 'change'); await wait(100);
+        out.volume = muteSound.volume; out.preview = !muteSound.paused; out.shown = $('soundVal').textContent;
+        sw.checked = false; fire(sw, 'change');
+        toggleMute(); await wait(100); out.silent = muteSound.paused && unmuteSound.paused;
+        toggleMute(); await wait(100); out.silent = out.silent && muteSound.paused && unmuteSound.paused;
+        const saved = JSON.parse(localStorage.getItem(PREFS_KEY));
+        out.saved = saved.muteSounds === false && saved.muteSoundVol === 50;
+        sw.checked = true; fire(sw, 'change'); s.value = 100; fire(s, 'input');
+        return out;
+      });
+      check('the mute sounds have a volume that previews on release', Math.abs(soundSet.volume - 0.25) < 0.001 && soundSet.preview && soundSet.shown === '50%', `50% plays at ${soundSet.volume} (by loudness), preview: ${soundSet.preview}`);
+      check('the mute sounds can be turned off, and that is saved', soundSet.silent && soundSet.saved, `silent: ${soundSet.silent}, saved: ${soundSet.saved}`);
+      // The muted badge: its own window, read through its own page
+      const badgeAt = () => evalIn(/badge\.html/, '({ vis: document.visibilityState, left: screenX - screen.availLeft, top: screenY - screen.availTop, right: screen.availLeft + screen.availWidth - screenX - outerWidth, bottom: screen.availTop + screen.availHeight - screenY - outerHeight })');
+      const pick = corner => copy.call(c => { const p = $('badgeCorner'); p.value = c; p.dispatchEvent(new Event('change', { bubbles: true })); }, corner);
+      await copy.call(() => { state.badge = true; $('badgeToggle').checked = true; state.badgeCorner = 'top-left'; $('badgeCorner').value = 'top-left'; return window.appBadge.set(true, 'top-left', false); });
+      const before = await badgeAt();
+      await copy.call(() => toggleMute()); await sleep(1500);
+      const onMute = await badgeAt();
+      await pick('bottom-right'); await sleep(500);
+      const moved = await badgeAt();
+      await copy.call(() => toggleMute()); await sleep(500);
+      const unmuted = await badgeAt();
+      check('a Muted badge shows in the chosen corner while muted', (!before || before.vis === 'hidden') && onMute && onMute.vis === 'visible' && onMute.left <= 20 && onMute.top <= 20 && moved.vis === 'visible' && moved.right <= 20 && moved.bottom <= 20, onMute ? `top left at ${onMute.left},${onMute.top}; bottom right ${moved.right},${moved.bottom} from the edges` : 'no badge window');
+      check('it goes away on unmute', unmuted && unmuted.vis === 'hidden', unmuted ? unmuted.vis : 'no badge window');
+      await pick('top-left'); await sleep(500);
+      const preview = await badgeAt(); await sleep(2700);
+      const afterPreview = await badgeAt();
+      check('choosing a corner shows it for a moment', preview.vis === 'visible' && preview.left <= 20 && afterPreview.vis === 'hidden', `${preview.vis}, then ${afterPreview.vis}`);
+      await copy.call(() => { const t = $('badgeToggle'); t.checked = false; t.dispatchEvent(new Event('change', { bubbles: true })); toggleMute(); });
+      await sleep(500);
+      const badgeOff = await badgeAt();
+      await copy.call(() => { toggleMute(); const t = $('badgeToggle'); t.checked = true; t.dispatchEvent(new Event('change', { bubbles: true })); });
+      check('no badge when it is turned off', badgeOff.vis === 'hidden', `muted with the badge off: ${badgeOff.vis}`);
+      await sleep(2800);
       const hotkey = await copy.call(() => $('muteKeyHint').textContent);
       if (/in use/.test(hotkey)) {
         console.log('  SKIP  hotkey press: another Olive or app holds Ctrl+Alt+M');
@@ -776,6 +889,33 @@ async function updateChecks() {
   check('a release link off the repo is refused', (await checkForUpdate('1.6.0', reply(200, { tag_name: 'v1.7.0', html_url: 'https://example.com/x' }))).status === 'unavailable', 'unavailable');
   const failures = await Promise.all([reply(404, {}), reply(500, {}), async () => { throw new Error('offline'); }].map(f => checkForUpdate('1.6.0', f)));
   check('failures give a reason instead of crashing', failures.every(r => r.status === 'unavailable' && r.reason), failures.map(r => r.reason).join(' / '));
+
+  console.log('\nOne-click update download');
+  const { downloadInstaller } = require(path.join(ROOT, 'src', 'main', 'updates.js'));
+  const data = crypto.randomBytes(400000), sha = crypto.createHash('sha256').update(data).digest('hex');
+  const asset = { name: 'Olive-Setup-1.7.0.exe', size: data.length, digest: 'sha256:' + sha, browser_download_url: 'https://github.com/Zaytoonic/Olive/releases/download/v1.7.0/Olive-Setup-1.7.0.exe' };
+  const withAssets = assets => checkForUpdate('1.6.0', reply(200, { tag_name: 'v1.7.0', html_url: url, assets }));
+  const offered = (await withAssets([{ ...asset, name: 'Olive-Setup-1.6.9.exe' }, asset])).installer;
+  check("the release's installer is found, with its size and checksum", offered && offered.size === data.length && offered.sha256 === sha && offered.url === asset.browser_download_url, offered ? `${offered.name}, ${offered.size} bytes` : 'none');
+  const refused = await Promise.all([
+    withAssets([{ ...asset, digest: undefined }]), withAssets([{ ...asset, browser_download_url: 'https://example.com/Olive-Setup-1.7.0.exe' }]),
+    withAssets([{ ...asset, name: 'Olive-Setup-1.6.9.exe' }]), withAssets(undefined)
+  ]);
+  check('no checksum, off the repo, another version or none: nothing to install', refused.every(r => r.status === 'available' && r.installer === null), 'only the release page is offered');
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'olive-update-test-')), dest = path.join(folder, asset.name);
+  const serve = (body, status = 200) => async () => new Response(body, { status });
+  const attempt = body => downloadInstaller(offered, typeof body === 'function' ? body : serve(body), dest).then(() => null, err => err.message);
+  try {
+    const progress = [];
+    await downloadInstaller(offered, serve(data), dest, p => progress.push(p));
+    check('a download that matches is kept', fs.readFileSync(dest).equals(data) && progress[progress.length - 1] === 1 && !fs.existsSync(dest + '.part'), `${progress.length} progress updates, file in place`);
+    fs.rmSync(dest);
+    const tampered = Buffer.from(data); tampered[12345] ^= 1;
+    const bad = await attempt(tampered);
+    check("a download that doesn't match the checksum is thrown away", /doesn't match/.test(bad) && !fs.existsSync(dest) && !fs.existsSync(dest + '.part'), bad);
+    const others = [await attempt(data.subarray(0, 1000)), await attempt(Buffer.concat([data, Buffer.from('x')])), await attempt(serve('', 404)), await attempt(async () => { throw new Error('offline'); })];
+    check('short, oversized and failed downloads are refused', /cut short/.test(others[0]) && /bigger/.test(others[1]) && /404/.test(others[2]) && /offline/.test(others[3]) && !fs.existsSync(dest), others.join(' / '));
+  } finally { fs.rmSync(folder, { recursive: true, force: true }); }
 }
 
 // ---- From the old name: real saved settings in an old folder, opened by a real copy of the app under the new one ----

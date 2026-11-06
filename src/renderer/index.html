@@ -43,8 +43,10 @@
             <div id="micNotice" class="hint notice"></div>
             <div id="devStatus" class="hint"></div>
             <div id="appNotice" class="hint notice"></div>
+            <div id="testHint" class="hint" aria-live="polite"></div>
           </div>
           <div class="current-actions">
+            <button id="testBtn" class="pill test" title="Record 5 seconds, then hear exactly what Olive sends to Discord" disabled>Test mic</button>
             <button id="listenBtn" class="pill listen" aria-pressed="false" title="Hear your mic live (use headphones)">Listen</button>
             <button id="muteBtn" class="pill mute" aria-pressed="false" title="Toggle mute (Ctrl+M)">Mute</button>
           </div>
@@ -158,6 +160,30 @@
             <label class="switch" title="Toggle mute with this shortcut, even when this window is hidden"><input type="checkbox" id="muteKeyToggle" checked><span></span></label>
           </div>
         </div>
+        <div class="row card">
+          <div class="row-head">
+            <span class="row-title">Mute sounds</span>
+            <div class="row-end"><span class="value" id="soundVal"></span><label class="switch" title="Play a short sound when you mute or unmute"><input type="checkbox" id="soundToggle" checked><span></span></label></div>
+          </div>
+          <input type="range" id="soundVol" min="5" max="100" value="100" aria-label="Mute sound volume">
+          <div class="hint" id="soundHint"></div>
+        </div>
+        <div class="row toggle-row">
+          <div>
+            <div class="row-title">Muted badge on screen</div>
+            <div class="hint" id="badgeHint"></div>
+          </div>
+          <div class="row-end">
+            <select id="badgeCorner" title="Where the badge appears" aria-label="Badge position">
+              <option value="top-left">Top left</option>
+              <option value="top-center">Top middle</option>
+              <option value="top-right">Top right</option>
+              <option value="bottom-left">Bottom left</option>
+              <option value="bottom-right">Bottom right</option>
+            </select>
+            <label class="switch" title="Show a small Muted badge over other apps while you're muted"><input type="checkbox" id="badgeToggle" checked><span></span></label>
+          </div>
+        </div>
         <div class="row toggle-row">
           <div>
             <div class="row-title">Push to talk</div>
@@ -174,6 +200,7 @@
             <div class="hint" id="updateHint">Asks GitHub once a day if there's a new version</div>
           </div>
           <div class="row-end">
+            <button type="button" id="updateNotes" class="pill small" hidden>What's new</button>
             <button type="button" id="updateBtn" class="pill small">Check now</button>
             <label class="switch" title="Check for new versions automatically"><input type="checkbox" id="updateAuto" checked><span></span></label>
           </div>

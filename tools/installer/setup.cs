@@ -1,11 +1,15 @@
 // The Olive installer: installs for this Windows account, so it needs no admin rights.
-// The app and the uninstaller are embedded in this exe. Options: --silent, --dir <folder>, --tag <test name>, --log <file>
+// The app and the uninstaller are embedded in this exe. Options: --silent, --dir <folder>, --tag <test name>, --log <file>,
+// --desktop. For an update started from inside Olive: --wait <its process id> lets it close by itself first, and
+// --relaunch opens Olive again afterwards, whether or not the install worked, with any arguments given after "--".
 using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -225,24 +229,66 @@ namespace OliveSetup
 
     static class Program
     {
-        [STAThread]
-        static int Main(string[] args)
+        // Windows' rules for one command-line argument: quotes around it if needed, and backslashes doubled before a quote.
+        static string Quote(string a)
         {
+            if (a.Length > 0 && a.IndexOfAny(new[] { ' ', '\t', '"' }) < 0) return a;
+            StringBuilder sb = new StringBuilder("\"");
+            int slashes = 0;
+            foreach (char c in a)
+            {
+                if (c == '\\') { slashes++; continue; }
+                sb.Append('\\', c == '"' ? slashes * 2 + 1 : slashes);
+                sb.Append(c);
+                slashes = 0;
+            }
+            sb.Append('\\', slashes * 2);
+            return sb.Append('"').ToString();
+        }
+
+        static void WaitForExit(string pid)
+        {
+            int id;
+            if (pid == null || !int.TryParse(pid, out id)) return;
+            try { using (Process p = Process.GetProcessById(id)) p.WaitForExit(15000); }
+            catch (Exception) { /* already gone */ }
+        }
+
+        static void Relaunch(string dir, string[] args)
+        {
+            string exe = Path.Combine(Path.GetFullPath(dir), "Olive.exe");
+            if (!File.Exists(exe)) return;
+            string line = string.Join(" ", Array.ConvertAll(args, Quote));
+            // Through the shell, so the new copy inherits nothing from this installer, which itself inherited open handles
+            // (even listening sockets) from the copy that started it. Those go away when this installer exits.
+            try { Process.Start(new ProcessStartInfo(exe, line) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe) }); }
+            catch (Exception) { /* Olive can still be opened from the Start menu */ }
+        }
+
+        [STAThread]
+        static int Main(string[] all)
+        {
+            int split = Array.IndexOf(all, "--");
+            string[] args = split < 0 ? all : all.Take(split).ToArray();
+            string[] relaunchArgs = split < 0 ? new string[0] : all.Skip(split + 1).ToArray();
             Common.Tag = Common.Option(args, "--tag") ?? "";
             string dir = Common.Option(args, "--dir") ?? Installer.DefaultFolder();
             if (Common.Flag(args, "--silent"))
             {
                 string log = Common.Option(args, "--log");
+                int code = 0;
+                WaitForExit(Common.Option(args, "--wait"));
                 try
                 {
                     Installer.Install(dir, Common.Flag(args, "--desktop"), p => { });
-                    return 0;
                 }
                 catch (Exception ex)
                 {
-                    if (log != null) File.WriteAllText(log, ex.ToString());
-                    return 1;
+                    code = 1;
+                    if (log != null) { try { File.WriteAllText(log, ex.Message + "\r\n\r\n" + ex); } catch (Exception) { } }
                 }
+                if (Common.Flag(args, "--relaunch")) Relaunch(dir, relaunchArgs);
+                return code;
             }
             Application.EnableVisualStyles();
             Application.Run(new SetupForm(Path.GetFullPath(dir)));

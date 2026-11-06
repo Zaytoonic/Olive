@@ -61,7 +61,8 @@ namespace OliveSetup
             }
         }
 
-        // Windows can keep a folder locked for a moment after the programs in it end.
+        // Windows can keep a folder locked for a moment after the programs in it end, and an antivirus scan of
+        // freshly unpacked files can hold it for several seconds more. Up to 30 s.
         public static void Retry(Action action)
         {
             for (int i = 0; ; i++)
@@ -69,7 +70,7 @@ namespace OliveSetup
                 try { action(); return; }
                 catch (Exception)
                 {
-                    if (i >= 40) throw;
+                    if (i >= 120) throw;
                     Thread.Sleep(250);
                 }
             }

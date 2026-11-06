@@ -23,7 +23,14 @@ contextBridge.exposeInMainWorld('appInfo', {
   version: () => ipcRenderer.invoke('app:version'),
   notices: () => ipcRenderer.invoke('app:notices'),
   checkForUpdate: () => ipcRenderer.invoke('update:check'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  onUpdateProgress: cb => { ipcRenderer.on('update:progress', (event, p) => cb(Number(p))); },
+  updateResult: () => ipcRenderer.invoke('update:result'),
   open: name => ipcRenderer.invoke('app:open', String(name))
+});
+
+contextBridge.exposeInMainWorld('appBadge', {
+  set: (on, corner, preview) => ipcRenderer.invoke('badge:set', on === true, String(corner), preview === true)
 });
 
 contextBridge.exposeInMainWorld('appPtt', {

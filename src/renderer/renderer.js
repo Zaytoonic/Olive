@@ -4,7 +4,8 @@ const state = {
   deviceId: null,
   volume: 75, muted: false, gateDb: -45, gateAuto: true,
   nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M', eqOpen: false,
-  ptt: false, pttKey: null, outputId: 'default', outputName: null, setupDone: false, updateAuto: true
+  ptt: false, pttKey: null, outputId: 'default', outputName: null, setupDone: false, updateAuto: true,
+  muteSounds: true, muteSoundVol: 100, badge: true, badgeCorner: 'top-left'
 };
 
 const $ = id => document.getElementById(id);
@@ -71,7 +72,22 @@ const muteSound = new Audio('../../assets/mute.wav'), unmuteSound = new Audio('.
 muteSound.preload = unmuteSound.preload = 'auto';
 function playMuteSound(muting) {
   for (const s of [muteSound, unmuteSound]) { s.pause(); s.currentTime = 0; }
-  (muting ? muteSound : unmuteSound).play().catch(() => {});
+  if (state.muteSounds) (muting ? muteSound : unmuteSound).play().catch(() => {});
+}
+// The slider follows loudness rather than raw level: halfway sounds about half as loud.
+function applyMuteSoundVol() {
+  muteSound.volume = unmuteSound.volume = (state.muteSoundVol / 100) ** 2;
+  $('soundVal').textContent = state.muteSounds ? state.muteSoundVol + '%' : 'Off';
+  $('soundVol').disabled = !state.muteSounds;
+  $('soundHint').textContent = state.muteSounds ? "Play where Listen plays. Discord doesn't hear them" : 'Off: muting and unmuting are silent';
+}
+function initMuteSounds() {
+  $('soundToggle').checked = state.muteSounds;
+  $('soundVol').value = state.muteSoundVol;
+  applyMuteSoundVol();
+  $('soundToggle').addEventListener('change', e => { state.muteSounds = e.target.checked; applyMuteSoundVol(); if (state.muteSounds) playMuteSound(true); });
+  $('soundVol').addEventListener('input', e => { state.muteSoundVol = +e.target.value; applyMuteSoundVol(); });
+  $('soundVol').addEventListener('change', () => playMuteSound(true));   // let go of the slider: hear the new level
 }
 // Mute means everything agrees: the app, the selected mic, and the Windows recording devices Discord could listen to
 // (the virtual cable and the default device). Otherwise unmuting here could leave the cable muted, and Discord silent.
@@ -129,7 +145,7 @@ function syncChains() {
   if (need && audioCtx.state === 'suspended') audioCtx.resume();
   if (srcNode && need && !srcLinked) { srcNode.connect(eqNodes.head); srcLinked = true; }
   if (srcNode && !need && srcLinked) { try { srcNode.disconnect(eqNodes.head); } catch {} srcLinked = false; }
-  if (!need && audioCtx.state === 'running') audioCtx.suspend();
+  if (!need && audioCtx.state === 'running' && !testPlaying) audioCtx.suspend();   // a mic test plays back on this context
   syncTicker();
 }
 // The timer runs while the window is showing (the meter), or when a chain needs the main-thread gate (which needs 20 ms).
@@ -193,8 +209,8 @@ function updateCompHint() {
   $('compHint').textContent = r < -0.5 ? `Evening out ${(-r).toFixed(1)} dB` : 'Evens out your volume';
 }
 function updateVolumeGain() { chains().forEach(ch => rampTo(ch.volGain.gain, volFactor(), 0.02, ch.ctx)); }
-function updateMonitorGain() {
-  if (eqNodes) rampTo(eqNodes.outGain.gain, state.monitor && talking() ? state.monitorVol / 100 : 0, talkFade(), eqNodes.ctx);
+function updateMonitorGain() {     // Listen goes quiet while a mic test plays back, so you hear only the recording
+  if (eqNodes) rampTo(eqNodes.outGain.gain, state.monitor && talking() && !testPlaying ? state.monitorVol / 100 : 0, talkFade(), eqNodes.ctx);
 }
 let autoGateDb = -51;
 const gateDbNow = () => (state.gateAuto ? autoGateDb : state.gateDb);
@@ -230,6 +246,7 @@ function updateHints() {
   $('monHint').textContent = !state.monitor ? "You won't hear yourself"
     : analyser ? 'Use headphones to avoid echo'
     : 'On · microphone not open, nothing to play';
+  if (!micTest) $('testBtn').disabled = !analyser;
 }
 
 // ---- Level meter ----
@@ -1240,6 +1257,10 @@ function loadPrefs() {
   if (typeof p.outputName === 'string') state.outputName = p.outputName;
   state.setupDone = p.setupDone === true;
   state.updateAuto = p.updateAuto !== false;
+  state.muteSounds = p.muteSounds !== false;
+  state.muteSoundVol = num(p.muteSoundVol, 5, 100, state.muteSoundVol);
+  state.badge = p.badge !== false;
+  if (['top-left', 'top-center', 'top-right', 'bottom-left', 'bottom-right'].includes(p.badgeCorner)) state.badgeCorner = p.badgeCorner;
   if (p.eqByMic && typeof p.eqByMic === 'object') Object.assign(eqByMic, p.eqByMic);
   const startEq = (prefDeviceName && eqByMic[prefDeviceName]) || p.eq;
   if (startEq && typeof startEq === 'object') restoreEq(startEq);
@@ -1269,6 +1290,7 @@ function savePrefs() {
     nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol, send: sendWanted,
     ptt: state.ptt, pttKey: state.pttKey, outputId: state.outputId, outputName: state.outputName, setupDone: state.setupDone, updateAuto: state.updateAuto,
     comp: state.comp, compAmount: state.compAmount, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel, eqOpen: state.eqOpen,
+    muteSounds: state.muteSounds, muteSoundVol: state.muteSoundVol, badge: state.badge, badgeCorner: state.badgeCorner,
     eq: snapshotEq(),
     eqByMic: eqOwner ? { ...eqByMic, [eqOwner]: snapshotEq() } : eqByMic
   };
@@ -1527,29 +1549,170 @@ function bindSetup() {
   $('setupOpen').addEventListener('click', () => { state.setupDone = false; freshInstall = true; updateSetup(); });
 }
 
+// ---- Mic test: record 5 s of what Olive sends, then play it back to you ----
+// Recorded after noise reduction, EQ, volume, gate and compressor, and before mute and push to talk: what Discord gets
+// while you talk. So it works while muted, with nobody else hearing it. It plays back only on your own output.
+const TEST_SECONDS = 5, RECORDER_URL = 'app://local/recorder-worklet.js';
+const recorderModules = new WeakMap();
+let micTest = null, testPlaying = false;
+function showTest(label, phase, hint) {
+  const b = $('testBtn');
+  b.textContent = label;
+  b.classList.toggle('recording', phase === 'recording');
+  b.classList.toggle('playing', phase === 'playing');
+  if (hint !== undefined) $('testHint').textContent = hint;
+}
+async function startMicTest() {
+  const ch = analyser && meterChain();
+  if (!ch || micTest) return;
+  const t = micTest = { ch, chunks: [], phase: 'starting' };
+  try {
+    if (!recorderModules.has(ch.ctx)) recorderModules.set(ch.ctx, ch.ctx.audioWorklet.addModule(RECORDER_URL));
+    await recorderModules.get(ch.ctx);
+    t.rec = new AudioWorkletNode(ch.ctx, 'mic-recorder', { numberOfInputs: 1, numberOfOutputs: 0 });
+  } catch (err) {
+    endMicTest(t, "The mic test couldn't start: " + cleanErr(err));
+    return;
+  }
+  if (micTest !== t) return;
+  t.done = new Promise(resolve => { t.rec.port.onmessage = e => { if (e.data === 'done') resolve(); else t.chunks.push(e.data); }; });
+  ch.gateGain.connect(t.rec);
+  t.phase = 'recording';
+  const ends = performance.now() + TEST_SECONDS * 1000;
+  const count = () => {
+    if (t.phase !== 'recording') return;
+    const left = ends - performance.now();
+    if (left <= 0) { stopRecording(t); return; }
+    showTest(`Recording · ${Math.ceil(left / 1000)}`, 'recording');
+    t.timer = setTimeout(count, left % 1000 || 1000);
+  };
+  showTest(`Recording · ${TEST_SECONDS}`, 'recording', state.muted ? "Recording. You're muted, so nobody else hears this" : 'Recording. Talk the way you normally do');
+  count();
+}
+async function stopRecording(t) {
+  if (t.phase !== 'recording') return;
+  t.phase = 'stopping';
+  clearTimeout(t.timer);
+  t.rec.port.postMessage('stop');
+  await Promise.race([t.done, new Promise(r => setTimeout(r, 1000))]);   // a chain that was switched off sends nothing more
+  try { t.ch.gateGain.disconnect(t.rec); } catch {}
+  if (micTest !== t) return;
+  const rate = t.ch.ctx.sampleRate, frames = t.chunks.reduce((n, c) => n + c[0].length, 0);
+  if (frames < rate * 0.3 || !audioCtx) { endMicTest(t, 'That was too short to play back. Try again'); return; }
+  const channels = Math.max(...t.chunks.map(c => c.length)), buf = audioCtx.createBuffer(channels, frames, rate);
+  let at = 0, peak = 0;
+  for (const c of t.chunks) {
+    for (let k = 0; k < channels; k++) buf.getChannelData(k).set(c[Math.min(k, c.length - 1)], at);
+    for (const v of c[0]) { const a = Math.abs(v); if (a > peak) peak = a; }
+    at += c[0].length;
+  }
+  t.chunks = null;
+  t.seconds = frames / rate; t.peakDb = ampToDb(peak);
+  const silent = t.peakDb < -50;
+  const heard = silent ? 'Nothing got through: the noise gate stayed shut. Talk louder, or turn the gate down'
+    : sendNodes && state.send ? 'Playing back what Discord hears'
+    : "Playing back Olive's sound. Send to Discord is off, so Discord hears your raw mic";
+  t.phase = 'playing';
+  testPlaying = true;
+  updateMonitorGain();
+  try { if (audioCtx.state !== 'running') await audioCtx.resume(); } catch { /* plays when it can */ }
+  if (micTest !== t) return;
+  const src = t.src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(audioCtx.destination);           // your output only: the cable is on a different context
+  src.onended = () => endMicTest(t, silent ? heard : '');
+  src.start();
+  showTest('Stop', 'playing', heard);
+}
+function endMicTest(t, hint) {
+  if (micTest !== t) return;
+  micTest = null;
+  clearTimeout(t.timer);
+  if (t.rec) { try { t.ch.gateGain.disconnect(t.rec); } catch {} t.rec.port.postMessage('stop'); }
+  if (t.src) { t.src.onended = null; try { t.src.stop(); } catch {} try { t.src.disconnect(); } catch {} }
+  testPlaying = false;
+  updateMonitorGain();
+  syncChains();
+  showTest('Test mic', null, hint);
+  $('testBtn').disabled = !analyser;
+}
+function bindMicTest() {
+  $('testBtn').addEventListener('click', () => {
+    if (!micTest) startMicTest();
+    else if (micTest.phase === 'recording') stopRecording(micTest);
+    else if (micTest.phase === 'playing') endMicTest(micTest, '');
+  });
+}
+
+// ---- Muted badge ----
+// The badge is its own small window, made by main.js; this only says whether it's wanted and where.
+function initBadge() {
+  const t = $('badgeToggle'), pick = $('badgeCorner');
+  if (!window.appBadge) { t.disabled = true; t.checked = false; pick.disabled = true; $('badgeHint').textContent = 'Only in the Windows app'; return; }
+  t.checked = state.badge;
+  pick.value = state.badgeCorner;
+  const apply = preview => {
+    pick.disabled = !state.badge;
+    $('badgeHint').textContent = state.badge ? "Shows over other apps and windowed games while you're muted" : 'Off: the tray icon still turns red while muted';
+    window.appBadge.set(state.badge, state.badgeCorner, preview).catch(() => {});
+  };
+  t.addEventListener('change', () => { state.badge = t.checked; apply(true); });
+  pick.addEventListener('change', () => { state.badgeCorner = pick.value; apply(true); });
+  apply(false);
+}
+
 // ---- Updates ----
+// Install downloads the new installer, checks it against GitHub, and lets it replace this copy and open it again.
+// A copy that wasn't installed (a build folder) gets Download instead, which opens the release page.
 const UPDATE_EVERY_MS = 24 * 3600 * 1000;
-let updateAvailable = false;
+let updateAvailable = null, updating = false;
 async function checkUpdates(asked) {
-  if (!window.appInfo) return;
+  if (!window.appInfo || updating) return;
   const hint = $('updateHint'), btn = $('updateBtn');
   if (asked) { hint.textContent = 'Checking…'; btn.disabled = true; }
   let r;
   try { r = await window.appInfo.checkForUpdate(); } catch (err) { r = { status: 'unavailable', reason: cleanErr(err) }; }
   btn.disabled = false;
   if (r.status === 'available') {
-    updateAvailable = true;
-    hint.textContent = `Olive ${r.version} is available`;
-    btn.textContent = 'Download';
+    updateAvailable = r;
+    hint.textContent = r.canInstall ? `Olive ${r.version} is available. Installing closes Olive for a few seconds` : `Olive ${r.version} is available`;
+    btn.textContent = r.canInstall ? 'Install' : 'Download';
+    $('updateNotes').hidden = !r.canInstall;   // Download already opens the release page
   } else if (asked) {
     hint.textContent = r.status === 'current' ? "You're on the latest version" : "Couldn't check for updates: " + r.reason;
+  }
+}
+async function installUpdate() {
+  const hint = $('updateHint'), btn = $('updateBtn');
+  updating = true;
+  btn.disabled = true;
+  hint.textContent = 'Downloading… 0%';
+  try {
+    await window.appInfo.installUpdate();
+    hint.textContent = 'Installing. Olive will close and open again in a few seconds';
+  } catch (err) {
+    updating = false;
+    btn.disabled = false;
+    hint.textContent = `Couldn't update: ${cleanErr(err)}. Try again, or download it from What's new`;
   }
 }
 function initUpdates() {
   const t = $('updateAuto');
   t.checked = state.updateAuto;
   t.addEventListener('change', () => { state.updateAuto = t.checked; });
-  $('updateBtn').addEventListener('click', () => { if (updateAvailable) window.appInfo.open('release'); else checkUpdates(true); });
+  $('updateBtn').addEventListener('click', () => {
+    if (!updateAvailable) checkUpdates(true);
+    else if (updateAvailable.canInstall) installUpdate();
+    else window.appInfo.open('release');
+  });
+  $('updateNotes').addEventListener('click', () => window.appInfo.open('release'));
+  if (window.appInfo) {
+    window.appInfo.onUpdateProgress(p => { if (updating) $('updateHint').textContent = `Downloading… ${Math.floor(p * 100)}%`; });
+    window.appInfo.updateResult().then(r => {
+      if (r.error) showNotice(`The update couldn't be installed, so Olive is still on ${r.version}: ${r.error}`);
+      else if (r.updated) $('updateHint').textContent = `Updated to Olive ${r.version}`;
+    }).catch(() => {});
+  }
   const auto = () => { if (state.updateAuto) checkUpdates(false); };
   setTimeout(auto, 20000);
   setInterval(auto, UPDATE_EVERY_MS);
@@ -1597,6 +1760,9 @@ initPtt();
 bindOutput();
 bindSetup();
 initUpdates();
+initMuteSounds();
+initBadge();
+bindMicTest();
 if (eqBandsReset.length) {
   $('eqNotice').textContent = `${eqBandsReset.join(' and ')} had moved outside ${eqBandsReset.length > 1 ? 'their ranges' : 'its range'}, so ${eqBandsReset.length > 1 ? 'they were' : 'it was'} reset to flat.`;
   savePrefs();
