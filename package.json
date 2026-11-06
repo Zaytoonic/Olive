@@ -9,6 +9,7 @@
     "build": "node tools/build.js",
     "patch-exe": "node tools/patch-exe.js",
     "make-icons": "node tools/make-icons.js",
+    "make-sounds": "node tools/make-sounds.js",
     "installer": "node tools/make-installer.js",
     "test:installer": "node tools/installer/test.js",
     "test:audio": "node tools/audio-test/run.js",

@@ -10,7 +10,7 @@
 - **Compressor** to even out your volume.
 - **Six-band EQ** with a low cut and presets, saved separately for each mic, and a hold-to-compare button.
 - **Send to Discord or other apps** through [VB-Audio Virtual Cable](https://vb-audio.com/Cable/).
-- **Windows mic volume and mute**, with a mute hotkey that works from anywhere and a sound when you mute.
+- **Windows mic volume and mute**, with a mute hotkey that works from anywhere and a short sound when you mute or unmute.
 - **Push to talk** on any key or side mouse button.
 - **Listen** to hear your processed mic live, on the output device you choose.
 - **Runs in the tray**, and can start with Windows.
@@ -63,9 +63,9 @@ src/renderer/    the window
   gate-worklet.js  volume gate, for a gate set by hand or as the fallback
   nr-worklet.js    fallback noise reduction, if the voice engine can't start
   vendor/          RNNoise compiled to WebAssembly (@jitsi/rnnoise-wasm 0.2.1, Apache-2.0)
-assets/          icons (drawn by tools/make-icons.js) and the mute sound
+assets/          icons and mute sounds, both made from code (tools/make-icons.js, tools/make-sounds.js)
 docs/            the screenshot above
-tools/           build, packaging, signing and icon scripts
+tools/           build, packaging, signing, icon and sound scripts
   audio-test/      npm run test:audio
   installer/       the installer and uninstaller source, and npm run test:installer
 ```

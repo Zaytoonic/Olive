@@ -66,12 +66,12 @@ function bindControls() {
 }
 function toggleMute() { const m = !state.muted; setAllMuted(m); playMuteSound(m); }
 // Only for a mute you asked for, not when syncing with Windows. Plays on your speakers only: it isn't part of the mic chain, so Discord never hears it.
-const muteSound = new Audio('../../assets/mute-sound.mp3');
-muteSound.preload = 'auto';
+// Both are made by tools/make-sounds.js: two notes stepping down for mute, up for unmute.
+const muteSound = new Audio('../../assets/mute.wav'), unmuteSound = new Audio('../../assets/unmute.wav');
+muteSound.preload = unmuteSound.preload = 'auto';
 function playMuteSound(muting) {
-  muteSound.pause();
-  muteSound.currentTime = 0;
-  if (muting) muteSound.play().catch(() => {});
+  for (const s of [muteSound, unmuteSound]) { s.pause(); s.currentTime = 0; }
+  (muting ? muteSound : unmuteSound).play().catch(() => {});
 }
 // Mute means everything agrees: the app, the selected mic, and the Windows recording devices Discord could listen to
 // (the virtual cable and the default device). Otherwise unmuting here could leave the cable muted, and Discord silent.
@@ -1473,12 +1473,12 @@ function initPtt() {
   applyPtt();
 }
 
-// ---- Where Listen and the mute sound play ----
+// ---- Where Listen and the mute sounds play ----
 let appliedOutput = 'default';
 async function setOutput(id) {
   if (id === appliedOutput) return;
   const sink = id === 'default' ? '' : id;
-  await Promise.all([audioCtx ? audioCtx.setSinkId(sink) : null, muteSound.setSinkId(sink)]);
+  await Promise.all([audioCtx ? audioCtx.setSinkId(sink) : null, muteSound.setSinkId(sink), unmuteSound.setSinkId(sink)]);
   appliedOutput = id;
 }
 async function loadOutputs() {
