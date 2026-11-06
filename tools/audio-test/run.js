@@ -513,7 +513,7 @@ async function liveChecks(profile, wav, fixture) {
         const real = out.options.find(v => v !== 'default');
         if (real) {
           pick.value = real; pick.dispatchEvent(new Event('change', { bubbles: true })); await wait(800);
-          out.ctxSink = audioCtx.sinkId === real; out.soundSink = muteSound.sinkId === real;
+          out.ctxSink = audioCtx.sinkId === real; out.soundSink = muteSound.sinkId === real && unmuteSound.sinkId === real;
           out.saved = JSON.parse(localStorage.getItem(PREFS_KEY)).outputId === real;
         }
         state.outputId = 'not-a-device'; state.outputName = 'Gone speakers';
@@ -524,7 +524,7 @@ async function liveChecks(profile, wav, fixture) {
         out.hasReal = !!real;
         return out;
       });
-      check('Listen and the mute sound follow the chosen device', !output.hasReal || (output.ctxSink && output.soundSink && output.saved), output.hasReal ? `${output.options.length} outputs, both moved, saved: ${output.saved}` : 'only the default exists here');
+      check('Listen and the mute sounds follow the chosen device', !output.hasReal || (output.ctxSink && output.soundSink && output.saved), output.hasReal ? `${output.options.length} outputs, both moved, saved: ${output.saved}` : 'only the default exists here');
       check('the cable is not offered as a place to listen', !output.cableListed, `${output.options.length} outputs listed`);
       check('a missing device falls back and says so', output.goneValue === 'default' && output.goneCtx === '' && output.goneHint.includes('Gone speakers') && output.keptName === 'Gone speakers', `"${output.goneHint}"`);
 
@@ -669,17 +669,18 @@ async function liveChecks(profile, wav, fixture) {
       }
       await copy.call(() => toggleMute());
       const sound = await copy.call(async () => {
-        const wait = ms => new Promise(r => setTimeout(r, ms)), out = { duration: muteSound.duration };
+        const wait = ms => new Promise(r => setTimeout(r, ms)), playing = s => !s.paused && s.currentTime > 0;
+        const out = { durations: [muteSound.duration, unmuteSound.duration] };
+        toggleMute(); await wait(100);                 // starts muted: this unmutes
+        out.unmuteOnUnmute = playing(unmuteSound) && muteSound.paused;
         toggleMute(); await wait(100);
-        out.quietOnUnmute = muteSound.paused;
-        toggleMute(); await wait(300);
-        out.playedOnMute = !muteSound.paused && muteSound.currentTime > 0;
+        out.muteOnMute = playing(muteSound) && unmuteSound.paused && unmuteSound.currentTime === 0;
         toggleMute(); await wait(100);
-        out.stoppedOnUnmute = muteSound.paused && muteSound.currentTime === 0;
+        out.muteCutOff = muteSound.paused && muteSound.currentTime === 0 && playing(unmuteSound);
         toggleMute();
         return out;
       });
-      check('the mute sound plays on mute and stops on unmute', sound.duration > 0.5 && sound.duration < 1.5 && sound.quietOnUnmute && sound.playedOnMute && sound.stoppedOnUnmute, `${f1(sound.duration)} s long, played: ${sound.playedOnMute}, silent on unmute: ${sound.quietOnUnmute && sound.stoppedOnUnmute}`);
+      check('each way has its own short sound, and a new one cuts off the last', sound.durations.every(d => d > 0.2 && d < 1) && sound.unmuteOnUnmute && sound.muteOnMute && sound.muteCutOff, `${sound.durations.map(f1).join(' s and ')} s long, unmute: ${sound.unmuteOnUnmute}, mute: ${sound.muteOnMute}, cut off: ${sound.muteCutOff}`);
       await copy.call(() => toggleMute());
       const hotkey = await copy.call(() => $('muteKeyHint').textContent);
       if (/in use/.test(hotkey)) {
