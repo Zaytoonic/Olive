@@ -1,6 +1,7 @@
 const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, protocol, globalShortcut, screen, shell, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 
 // A simple window that mostly sits in the tray doesn't need the graphics process. Measured: about 150 MB less memory,
 // the same CPU with a moving meter, still smooth; only scrolling and dragging cost a little more, while they happen.
@@ -20,6 +21,7 @@ const WORKLETS = {
   '/gate-worklet.js': path.join(RENDERER, 'gate-worklet.js'),
   '/nr-worklet.js': path.join(RENDERER, 'nr-worklet.js'),
   '/voice-worklet.js': path.join(RENDERER, 'voice-worklet.js'),
+  '/recorder-worklet.js': path.join(RENDERER, 'recorder-worklet.js'),
   '/rnnoise-sync.js': path.join(RENDERER, 'vendor', 'rnnoise-sync.js')
 };
 function serveWorklet(request) {
@@ -32,7 +34,7 @@ function serveWorklet(request) {
 }
 const { HelperClient } = require('./sysmic-client');
 const { OLD_SETTINGS_FOLDER, migrateSettings, moveLoginEntry, repairLoginEntry } = require('./migrate');
-const { checkForUpdate } = require('./updates');
+const { GITHUB, checkForUpdate, downloadInstaller } = require('./updates');
 
 // ---- Windows microphone control (volume + mute) via the win-audio helper ----
 const HELPER_EXE = path.join(__dirname, 'win-audio.exe');
@@ -185,7 +187,7 @@ function requestMuteToggle() {
   if (repeat) return;
   if (win && !win.isDestroyed()) win.webContents.send('mute:toggle');
 }
-ipcMain.handle('mute:state', (event, on) => { muted = on === true; updateTray(); updateTaskbarBadge(); });
+ipcMain.handle('mute:state', (event, on) => { muted = on === true; updateTray(); updateTaskbarBadge(); updateBadge(); });
 // Registers this shortcut in place of the current one; none turns it off. Returns false if another app holds it.
 ipcMain.handle('mute:hotkey', (event, accelerator) => {
   if (muteHotkey) globalShortcut.unregister(muteHotkey);
@@ -198,12 +200,63 @@ ipcMain.handle('mute:hotkey', (event, accelerator) => {
 });
 ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('app:notices', () => notices.splice(0));
-let releaseUrl = null;
+// ---- Updates ----
+// Install: download the release's installer, check it, start it quietly and quit. The installer waits for Olive to close,
+// replaces it (putting the old copy back if anything fails) and opens it again; a failure is written to UPDATE_LOG.
+const isTestCopy = () => app.commandLine.hasSwitch('user-data-dir');
+// A test copy may use a made-up release on this PC and a test name for everything the installer registers (tools/installer/test.js).
+const testFeed = process.env.OLIVE_TEST_UPDATE_FEED, testTag = process.env.OLIVE_TEST_INSTALL_TAG;
+const updateFeed = () => (testFeed && isTestCopy() ? { api: testFeed, page: /^http:\/\/127\.0\.0\.1:\d+\//, asset: /^http:\/\/127\.0\.0\.1:\d+\// } : GITHUB);
+const UPDATE_LOG = () => path.join(app.getPath('userData'), 'update-error.txt');
+const DOWNLOADS = () => path.join(app.getPath('temp'), 'olive-update');
+// Only a copy the installer put there can update itself: it has the uninstaller beside it. Others get the release page.
+const installDir = () => {
+  const dir = path.dirname(process.execPath);
+  return app.isPackaged && fs.existsSync(path.join(dir, 'Uninstall Olive.exe')) ? dir : null;
+};
+const fetchFn = (url, options) => net.fetch(url, options);
+let releaseUrl = null, latest = null, installing = false;
+const updateResult = { updated: process.argv.includes('--updated'), error: null };
+function readUpdateResult() {
+  try {
+    updateResult.error = fs.readFileSync(UPDATE_LOG(), 'utf8').split(/\r?\n/)[0].replace(/^[\w.]+Exception: /, '').slice(0, 300) || 'unknown error';
+    updateResult.updated = false;
+    fs.rmSync(UPDATE_LOG(), { force: true });
+  } catch { /* no log: the last update, if any, worked */ }
+  // Installers from earlier updates; the last one may still be finishing, so wait a little.
+  setTimeout(() => { if (!installing) fs.rm(DOWNLOADS(), { recursive: true, force: true }, () => {}); }, 60000);
+}
+ipcMain.handle('update:result', () => ({ ...updateResult, version: app.getVersion() }));
 ipcMain.handle('update:check', async () => {
   if (!app.isPackaged) return { status: 'unavailable', reason: 'only checks in the built app' };
-  const result = await checkForUpdate(app.getVersion(), (url, options) => net.fetch(url, options));
+  const result = await checkForUpdate(app.getVersion(), fetchFn, updateFeed());
   releaseUrl = result.url || releaseUrl;
-  return { status: result.status, version: result.version, reason: result.reason };
+  if (result.status === 'available') latest = result;
+  return { status: result.status, version: result.version, reason: result.reason, canInstall: !!(result.installer && installDir()) };
+});
+ipcMain.handle('update:install', async event => {
+  const dir = installDir(), release = latest;
+  if (!release || !release.installer || !dir) throw new Error('this copy of Olive can only be updated from the release page');
+  if (installing) throw new Error('already updating');
+  installing = true;
+  try {
+    fs.mkdirSync(DOWNLOADS(), { recursive: true });
+    const file = path.join(DOWNLOADS(), release.installer.name);
+    await downloadInstaller(release.installer, fetchFn, file, p => { if (!event.sender.isDestroyed()) event.sender.send('update:progress', p); });
+    fs.rmSync(UPDATE_LOG(), { force: true });
+    // Opens again as it is now (same settings folder), shown, and knowing it was just updated.
+    const again = ['--updated', ...process.argv.slice(1).filter(a => a !== HIDDEN_ARG && a !== '--updated')];
+    const args = ['--silent', '--dir', dir, '--wait', String(process.pid), '--log', UPDATE_LOG(), '--relaunch'];
+    if (testTag && isTestCopy()) args.push('--tag', testTag);
+    const child = spawn(file, [...args, '--', ...again], { detached: true, stdio: 'ignore', windowsHide: true });
+    await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
+    child.unref();
+    setTimeout(quitApp, 500);                  // lets the page show "Installing" first
+    return true;
+  } catch (err) {
+    installing = false;
+    throw err;
+  }
 });
 // The page names a link instead of passing an address, so nothing in it can open anything else.
 ipcMain.handle('app:open', (event, name) => {
@@ -217,6 +270,55 @@ function updateTaskbarBadge() {
   if (muted) win.setOverlayIcon(nativeImage.createFromPath(path.join(ASSETS, 'taskbar-muted-badge.png')), 'Microphone muted');
   else win.setOverlayIcon(null, '');
 }
+
+// ---- Muted badge: a small "Muted" pill in a corner of the screen, over other apps and borderless games ----
+// Its own little window: clicks go through it and it never takes focus. Made the first time it's needed.
+const BADGE_SIZE = { width: 132, height: 52 }, BADGE_MARGIN = 12;
+const CORNERS = ['top-left', 'top-center', 'top-right', 'bottom-left', 'bottom-right'];
+let badge = null, badgeOn = false, badgeCorner = 'top-left', badgePreviewUntil = 0, badgePreviewTimer = null;
+function createBadge() {
+  badge = new BrowserWindow({
+    ...BADGE_SIZE, show: false, frame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false,
+    resizable: false, movable: false, minimizable: false, maximizable: false, fullscreenable: false,
+    skipTaskbar: true, focusable: false, alwaysOnTop: true, title: 'Olive muted',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false }
+  });
+  badge.setIgnoreMouseEvents(true);
+  badge.setAlwaysOnTop(true, 'screen-saver');
+  badge.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  badge.webContents.on('will-navigate', e => e.preventDefault());
+  badge.loadFile(path.join(RENDERER, 'badge.html'));
+  badge.once('ready-to-show', () => { badge.ready = true; updateBadge(); });
+  badge.on('closed', () => { badge = null; });
+}
+// On the screen you're using (where the pointer is), inside the area the taskbar leaves free.
+function placeBadge() {
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea, { width, height } = BADGE_SIZE;
+  const [v, h] = badgeCorner.split('-');
+  const x = h === 'left' ? area.x + BADGE_MARGIN : h === 'right' ? area.x + area.width - width - BADGE_MARGIN : area.x + Math.round((area.width - width) / 2);
+  const y = v === 'top' ? area.y + BADGE_MARGIN : area.y + area.height - height - BADGE_MARGIN;
+  badge.setBounds({ x, y, width, height });
+}
+function updateBadge() {
+  const wanted = badgeOn && process.platform === 'win32' && (muted || Date.now() < badgePreviewUntil);
+  if (!wanted) { if (badge && badge.isVisible()) badge.hide(); return; }
+  if (!badge) return createBadge();
+  if (!badge.ready) return;
+  placeBadge();
+  if (!badge.isVisible()) badge.showInactive();
+  badge.setAlwaysOnTop(true, 'screen-saver');   // back on top of anything that went full screen since
+}
+ipcMain.handle('badge:set', (event, on, corner, preview) => {
+  badgeOn = on === true;
+  if (CORNERS.includes(corner)) badgeCorner = corner;
+  clearTimeout(badgePreviewTimer);
+  badgePreviewUntil = 0;
+  if (preview === true && badgeOn && !muted) {   // after a change: show it for a moment so you can see where it goes
+    badgePreviewUntil = Date.now() + 2500;
+    badgePreviewTimer = setTimeout(updateBadge, 2600);
+  }
+  updateBadge();
+});
 
 function updateTray() {
   if (!tray) return;
@@ -249,6 +351,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', showWindow);
 
   app.whenReady().then(() => {
+    readUpdateResult();
     fixLoginItem();
     upgradeLoginItem();
     protocol.handle('app', serveWorklet);

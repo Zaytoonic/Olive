@@ -1,0 +1,9 @@
+/* The muted badge (badge.html): a red pill, centred in its small see-through window. */
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; }
+body { display: grid; place-items: center; }
+.badge {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px 7px 11px; border-radius: 9999px;
+  background: rgba(214, 47, 40, 0.92); color: #fff; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+  font: 600 15px/1 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; letter-spacing: 0.01em;
+}
+.badge svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }

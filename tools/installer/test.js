@@ -1,8 +1,11 @@
-// Runs the real installer and uninstaller end to end: npm run test:installer
+// Runs the real installer and uninstaller end to end, and an update from inside Olive: npm run test:installer
 // Everything is kept apart from a real install: its own temp folder, and a test name on every shortcut and registry value. Your Olive isn't touched.
+// The test copy's window opens for a moment when it reopens after its update. Takes about 2 minutes.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const http = require('http');
+const crypto = require('crypto');
 const { spawn, spawnSync, execFileSync } = require('child_process');
 
 const root = path.join(__dirname, '..', '..');
@@ -30,6 +33,120 @@ function runSetup(...extra) {
 }
 // Counted with @(...).Count: with no Olive running at all, a piped Get-Process makes PowerShell exit with an error.
 const procs = () => execFileSync('powershell.exe', ['-NoProfile', '-Command', `@(Get-Process Olive -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '${dir}\\*' }).Count`], { encoding: 'utf8' }).trim();
+
+// ---- Updating from inside Olive ----
+// The installed test copy is offered a made-up release 99.0.0 from a server on this PC (allowed for test copies only),
+// whose installer is this same installer. Clicking Install must download it, check it, close Olive, install, and reopen it.
+const CDP = 9461;
+async function page(timeoutMs = 60000) {
+  let seen = 'nothing on the port';
+  for (const end = Date.now() + timeoutMs; Date.now() < end; await sleep(300)) {
+    try {
+      const all = await (await fetch(`http://127.0.0.1:${CDP}/json`)).json();
+      seen = all.map(x => `${x.type} ${x.url}`).join(', ') || 'no targets';
+      const t = all.find(x => x.type === 'page' && /index\.html/.test(x.url));
+      if (!t) continue;
+      const ws = new WebSocket(t.webSocketDebuggerUrl);
+      await new Promise((a, b) => { ws.onopen = a; ws.onerror = b; });
+      let seq = 0; const waiting = new Map();
+      ws.onmessage = m => { const d = JSON.parse(m.data), cb = waiting.get(d.id); if (cb) { waiting.delete(d.id); cb(d.result); } };
+      ws.onclose = () => { for (const cb of waiting.values()) cb({ closed: true }); waiting.clear(); };
+      const run = expression => new Promise(r => { const id = ++seq; waiting.set(id, r); ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } })); })
+        .then(r => {
+          if (r.closed) return undefined;
+          if (r.exceptionDetails) throw new Error('in the page: ' + JSON.stringify(r.exceptionDetails).slice(0, 300));
+          return r.result && r.result.value;
+        });
+      // The page exists before its script has run: wait for the app itself.
+      if (!(await until(() => run(`document.readyState === 'complete' && typeof checkUpdates === 'function'`).catch(err => { seen = err.message; return false; }), 30000))) { ws.close(); continue; }
+      await sleep(1000);
+      return { run, close: () => ws.close() };
+    } catch (err) { seen = err.message + (err.cause ? ' (' + (err.cause.code || err.cause.message) + ')' : ''); }
+  }
+  throw new Error(`the installed copy never opened its page (${seen})`);
+}
+const until = async (fn, ms) => { for (const end = Date.now() + ms; Date.now() < end; await sleep(300)) { const v = await fn(); if (v) return v; } return null; };
+const mainPid = () => execFileSync('powershell.exe', ['-NoProfile', '-Command', `@(Get-CimInstance Win32_Process -Filter "Name='Olive.exe'" | Where-Object { $_.ExecutablePath -like '${dir}\\*' -and $_.CommandLine -notmatch '--type=' } | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }) -join '|'`], { encoding: 'utf8' }).trim();
+const stopCopies = () => execFileSync('powershell.exe', ['-NoProfile', '-Command', `Get-Process Olive -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '${dir}\\*' } | Stop-Process -Force; exit 0`]);
+
+async function updateChecks(exe, profile) {
+  console.log('\nUpdating from inside Olive');
+  const body = fs.readFileSync(setup), sha = crypto.createHash('sha256').update(body).digest('hex');
+  const tampered = Buffer.from(body); tampered[tampered.length - 100] ^= 1;
+  let served = tampered, downloads = 0;
+  const server = http.createServer((req, res) => {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    if (req.url === '/latest') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ tag_name: 'v99.0.0', html_url: `${base}/release`, assets: [{ name: 'Olive-Setup-99.0.0.exe', size: body.length, digest: 'sha256:' + sha, browser_download_url: `${base}/Olive-Setup-99.0.0.exe` }] }));
+    } else if (req.url === '/Olive-Setup-99.0.0.exe') {
+      downloads++;
+      res.setHeader('content-length', served.length);
+      res.end(served);
+    } else { res.statusCode = 404; res.end(); }
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const env = { ...process.env, OLIVE_TEST_UPDATE_FEED: `http://127.0.0.1:${server.address().port}/latest`, OLIVE_TEST_INSTALL_TAG: TAG };
+  const marker = path.join(dir, 'left-over-before-the-update.txt');
+  let p = null;
+  try {
+    spawn(exe, [`--user-data-dir=${profile}`, '--hidden', '--mute-audio', `--remote-debugging-port=${CDP}`], { stdio: 'ignore', detached: true, env }).unref();
+    p = await page();
+    await p.run('checkUpdates(true)');
+    const offer = await p.run(`({ hint: $('updateHint').textContent, button: $('updateBtn').textContent, notes: !$('updateNotes').hidden })`);
+    check('an installed copy offers Install', /99\.0\.0 is available/.test(offer.hint) && offer.button === 'Install' && offer.notes, `"${offer.hint}", button "${offer.button}"`);
+
+    fs.writeFileSync(marker, 'x');
+    const pidBefore = mainPid();
+    await p.run(`$('updateBtn').click()`);
+    const refusal = await until(() => p.run(`/^Couldn't update/.test($('updateHint').textContent) && $('updateHint').textContent`), 60000);
+    await sleep(2000);
+    check('a download that fails its checksum is never run', /doesn't match/.test(refusal || '') && mainPid() === pidBefore && fs.existsSync(marker), `"${refusal}", still running, nothing installed`);
+
+    served = body;
+    await p.run(`$('updateBtn').click()`);
+    const progress = await until(() => p.run(`/Downloading… \\d+%|Installing/.test($('updateHint').textContent) && $('updateHint').textContent`), 30000);
+    p.close(); p = null;
+    const t0 = Date.now();
+    const relaunched = await until(() => { const now = mainPid(); return now && now !== pidBefore && now.includes('--updated') ? now : null; }, 120000);
+    check('Install closes Olive, installs, and opens it again', !!relaunched && !fs.existsSync(marker), relaunched ? `back in ${Math.round((Date.now() - t0) / 1000)} s, old files replaced (saw "${progress}")` : 'it did not come back');
+    // Windows hands a new process the open handles of the one that started it. Its debugging port shows whether the
+    // new copy still holds anything of the old one: an inherited listening socket would sit on it and never answer.
+    const newPid = relaunched ? relaunched.split(' ')[0] : '';
+    const listeners = () => execFileSync('powershell.exe', ['-NoProfile', '-Command', `@(Get-NetTCPConnection -LocalPort ${CDP} -State Listen -ErrorAction SilentlyContinue | ForEach-Object OwningProcess | Sort-Object -Unique) -join ','`], { encoding: 'utf8' }).trim();
+    const owners = (await until(() => { const o = listeners(); return o === newPid ? o : null; }, 15000)) || listeners();
+    check('the reopened copy holds nothing of the old one', owners === newPid, `port ${CDP} is held by ${owners || 'nobody'}, the new copy is ${newPid}`);
+    p = await page();
+    const after = await until(() => p.run(`/Updated to Olive/.test($('updateHint').textContent) && ({ hint: $('updateHint').textContent, notice: $('appNotice').textContent, hidden: document.hidden })`), 20000);
+    const version = execFileSync('powershell.exe', ['-NoProfile', '-Command', `(Get-Item -LiteralPath '${exe}').VersionInfo.FileVersion`], { encoding: 'utf8' }).trim();
+    check('it says it was updated, with its settings folder and window back', after && after.hint === `Updated to Olive ${pkg.version}` && !after.notice && relaunched.includes(profile) && !relaunched.includes('--hidden'), after ? `"${after.hint}", exe ${version}` : 'no message');
+    check('the downloaded installer is checked before running: one bad, one good download', downloads === 2, `${downloads} downloads`);
+
+    // A failed install: something holds the folder the installer unpacks into. The old copy must come back and say so.
+    fs.writeFileSync(marker, 'x');
+    const stale = dir + '.new';
+    fs.mkdirSync(stale, { recursive: true });
+    const lockFile = path.join(stale, 'locked.txt');
+    fs.writeFileSync(lockFile, 'x');
+    const holder = spawn('powershell.exe', ['-NoProfile', '-Command', `$f = [IO.File]::Open('${lockFile}', 'Open', 'Read', 'None'); Start-Sleep -Seconds 40; $f.Close()`], { stdio: 'ignore' });
+    await sleep(1500);
+    await p.run('checkUpdates(true)');
+    await p.run(`$('updateBtn').click()`);
+    p.close(); p = null;
+    const pidUpdated = relaunched;
+    const back = await until(() => { const now = mainPid(); return now && now !== pidUpdated ? now : null; }, 120000);
+    p = back ? await page() : null;
+    const notice = p ? await until(() => p.run(`$('appNotice').textContent`), 20000) : null;
+    holder.kill();
+    check('a failed install brings the old copy back, and says why', !!back && fs.existsSync(marker) && /couldn't be installed/.test(notice || '') && /used by another process/i.test(notice || ''), `"${notice}"`);
+  } finally {
+    if (p) p.close();
+    server.close();
+    stopCopies();
+    await sleep(1500);
+    fs.rmSync(dir + '.new', { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+  }
+}
 
 (async () => {
   try {
@@ -66,6 +183,8 @@ const procs = () => execFileSync('powershell.exe', ['-NoProfile', '-Command', `@
     check('the old version is fully replaced', !fs.existsSync(path.join(dir, 'left-over-from-old-version.txt')) && fs.existsSync(exe), 'old files gone');
     check('it was closed for the upgrade', procs() === '0', 'no copy left running');
     check('no desktop shortcut is added unasked', fs.existsSync(desktop), 'the earlier one stays');
+
+    await updateChecks(exe, profile);
 
     console.log('\nUninstalling');
     fs.mkdirSync(settings, { recursive: true });

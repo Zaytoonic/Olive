@@ -127,6 +127,10 @@ select.current-name option { font-size: 15px; font-weight: 400; background: var(
 .pill.small.capturing { background: var(--accent); color: #fff; }
 .pill.listen.on { background: var(--accent); color: #fff; }
 .pill.mute.on { background: var(--red); color: #fff; }
+.pill:disabled, .pill:disabled:hover { opacity: .4; cursor: default; background: var(--tile); transform: none; }
+.pill.test { min-width: 124px; font-variant-numeric: tabular-nums; }
+.pill.test.recording { background: var(--red); color: #fff; }
+.pill.test.playing { background: var(--accent); color: #fff; }
 
 .muted-banner {
   display: flex; align-items: center; gap: 8px; margin-bottom: 16px; padding: 10px 12px; border-radius: 10px;
