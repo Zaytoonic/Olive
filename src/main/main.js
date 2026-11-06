@@ -114,8 +114,23 @@ ipcMain.handle('startup:set', (event, on) => {
 });
 
 // ---- Window + tray: closing the window hides it; Quit is in the tray menu ----
-let win = null, tray = null, quitting = false, trayHintShown = false;
+let win = null, tray = null, quitting = false;
 const notices = [];                            // problems from starting up, for the page to show
+
+// The first time the window is closed, explain where Olive went. Once ever: after that the tray tooltip is enough.
+const trayHintFile = () => path.join(app.getPath('userData'), 'tray-hint-shown');
+function showTrayHint() {
+  if (!tray || process.platform !== 'win32' || fs.existsSync(trayHintFile())) return;
+  try { fs.writeFileSync(trayHintFile(), ''); } catch {}
+  const size = Math.round(32 * screen.getPrimaryDisplay().scaleFactor);
+  tray.displayBalloon({
+    icon: nativeImage.createFromPath(path.join(ASSETS, 'icon.png')).resize({ width: size, height: size, quality: 'best' }),
+    largeIcon: true,
+    noSound: true,
+    title: 'Still running in the background',
+    content: 'Your mic settings stay on. To open Olive, click its icon by the clock (it may be under the ^ arrow). To close it fully, right-click that icon and choose Quit.'
+  });
+}
 
 function showWindow() {
   if (!win) return;
@@ -154,14 +169,7 @@ function createWindow() {
     if (quitting) return;
     e.preventDefault();                        // keep running in the tray (audio keeps flowing)
     win.hide();
-    if (!trayHintShown && tray && process.platform === 'win32') {
-      trayHintShown = true;
-      tray.displayBalloon({
-        iconType: 'info',
-        title: 'Olive is still running',
-        content: 'It keeps working in the background. Click the tray icon to open it, or right-click it and choose Quit.'
-      });
-    }
+    showTrayHint();
   });
   win.on('closed', () => { win = null; });
 }
@@ -227,6 +235,7 @@ function createTray() {
   updateTray();
   tray.on('click', showWindow);
   tray.on('double-click', showWindow);
+  tray.on('balloon-click', showWindow);
 }
 
 if (!app.requestSingleInstanceLock()) {
