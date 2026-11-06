@@ -28,7 +28,8 @@ function runSetup(...extra) {
   const r = spawnSync(setup, ['--silent', '--tag', TAG, '--dir', dir, '--log', log, ...extra], { timeout: 180000 });
   return { code: r.status, log: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').slice(0, 400) : '' };
 }
-const procs = () => execFileSync('powershell.exe', ['-NoProfile', '-Command', `Get-Process Olive -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '${dir}\\*' } | Measure-Object | Select-Object -ExpandProperty Count`], { encoding: 'utf8' }).trim();
+// Counted with @(...).Count: with no Olive running at all, a piped Get-Process makes PowerShell exit with an error.
+const procs = () => execFileSync('powershell.exe', ['-NoProfile', '-Command', `@(Get-Process Olive -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '${dir}\\*' }).Count`], { encoding: 'utf8' }).trim();
 
 (async () => {
   try {
