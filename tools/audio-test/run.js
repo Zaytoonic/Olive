@@ -442,12 +442,34 @@ async function liveChecks(profile, wav, fixture) {
         savePrefs();
         return {
           picker: !!document.getElementById('themeSelect'), attr: document.documentElement.dataset.theme || null, text: getComputedStyle(document.body).color,
-          accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(), names: [document.title, document.querySelector('h1').textContent, $('appFooter').textContent.split(' ')[0]],
+          accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(), names: [document.title, document.querySelector('h1').textContent, $('appVersion').textContent.split(' ')[0]],
           sheets: [...document.styleSheets].map(s => s.href.split('/').pop()), saved: 'theme' in JSON.parse(localStorage.getItem(PREFS_KEY))
         };
       });
       check('Classic is the only look, with no picker', !look.picker && !look.attr && !look.saved && look.text === 'rgb(245, 244, 240)' && look.sheets.join() === 'styles.css', `picker: ${look.picker}, stylesheets: ${look.sheets.join()}, text: ${look.text}`);
-      check('the window is branded Olive', look.accent === '#6B7F3A' && look.names.every(n => n === 'Olive'), `accent ${look.accent}, title / heading / footer: ${look.names.join(' / ')}`);
+      check('the window is branded Olive', look.accent === '#6B7F3A' && look.names.every(n => n === 'Olive'), `accent ${look.accent}, title / heading / settings: ${look.names.join(' / ')}`);
+      console.log('\nSettings panel');
+      const panel = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), shown = () => getComputedStyle($('settingsPanel')).visibility === 'visible';
+        const out = { closedAtStart: !shown(), inPanel: ['muteKeyToggle', 'pttToggle', 'soundToggle', 'badgeToggle', 'updateAuto', 'startupToggle'].every(id => $('settingsPanel').contains($(id))) };
+        $('settingsBtn').click(); await wait(300);
+        out.opened = shown() && $('settingsBtn').getAttribute('aria-expanded') === 'true' && document.querySelector('main').inert;
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(300);
+        out.escCloses = !shown() && !document.querySelector('main').inert && document.activeElement === $('settingsBtn');
+        $('settingsBtn').click(); await wait(300);
+        $('settingsScrim').click(); await wait(300);
+        out.scrimCloses = !shown();
+        const hint = $('muteKeyHint'), was = hint.textContent;
+        hint.textContent = 'Ctrl+Alt+M is already in use by another app'; await wait(50);
+        out.dotOn = !$('settingsDot').hidden && /hotkey/.test($('settingsBtn').title);
+        hint.textContent = 'Ctrl+Alt+M mutes your mic from anywhere'; await wait(50);
+        out.dotOff = $('settingsDot').hidden;
+        hint.textContent = was; await wait(50);
+        return out;
+      });
+      check('one-time settings live in a panel behind the gear, closed at start', panel.closedAtStart && panel.inPanel, `closed: ${panel.closedAtStart}, all six settings inside: ${panel.inPanel}`);
+      check('it opens, and Esc or a click outside closes it', panel.opened && panel.escCloses && panel.scrimCloses, `opens: ${panel.opened}, Esc: ${panel.escCloses}, outside: ${panel.scrimCloses}`);
+      check('a dot on the gear flags something that needs you', panel.dotOn && panel.dotOff, `hotkey taken: dot ${panel.dotOn}, cleared: ${panel.dotOff}`);
       console.log('\nNo microphone');
       const none = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), md = navigator.mediaDevices, realList = md.enumerateDevices.bind(md), out = {};

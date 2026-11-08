@@ -227,7 +227,7 @@ function refreshGateUi() {
   $('gate').disabled = state.gateAuto;          // the slider keeps your manual setting while Auto is on
   const byVoice = state.gateAuto && eqNodes && eqNodes.voice;
   $('gateMark').hidden = !!byVoice;             // a voice gate has no volume threshold to mark
-  const label = byVoice ? 'Auto · voice' : (state.gateAuto ? 'Auto · ' : '') + t + ' dB';
+  const label = byVoice ? 'Voice' : t + ' dB';   // the Auto chip beside it says whether it's automatic
   if (label !== shownGate) {
     shownGate = label;
     $('gateVal').textContent = label;
@@ -1744,6 +1744,37 @@ async function initStartup() {
   });
 }
 
+// ---- Settings panel ----
+// Things you set once live behind the gear. While it's open the rest of the window can't be reached by Tab.
+const settingsOpen = () => $('settingsPanel').classList.contains('open');
+function setSettingsOpen(open) {
+  $('settingsPanel').classList.toggle('open', open);
+  $('settingsScrim').classList.toggle('open', open);
+  $('settingsBtn').setAttribute('aria-expanded', open);
+  document.querySelector('main').inert = open;
+  document.querySelector('.toolbar').inert = open;
+  (open ? $('settingsPanel') : $('settingsBtn')).focus();
+}
+// A dot on the gear when something in there needs you, so nothing important hides behind it.
+function updateSettingsDot() {
+  const reasons = [];
+  if (updateAvailable) reasons.push(`Olive ${updateAvailable.version} is available`);
+  if (/in use/.test($('muteKeyHint').textContent)) reasons.push('the mute hotkey is taken by another app');
+  if ($('pttHint').classList.contains('notice')) reasons.push("push to talk can't watch its key");
+  $('settingsDot').hidden = !reasons.length;
+  $('settingsBtn').title = reasons.length ? 'Settings: ' + reasons.join('; ') : 'Settings';
+}
+function bindSettings() {
+  $('settingsBtn').addEventListener('click', () => setSettingsOpen(true));
+  $('settingsClose').addEventListener('click', () => setSettingsOpen(false));
+  $('settingsScrim').addEventListener('click', () => setSettingsOpen(false));
+  // Choosing a hotkey or talk key catches Esc first (in the capture phase), so Esc there cancels the choice, not the panel.
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && settingsOpen()) setSettingsOpen(false); });
+  const watch = new MutationObserver(updateSettingsDot);
+  for (const id of ['muteKeyHint', 'pttHint', 'updateHint']) watch.observe($(id), { childList: true, characterData: true, subtree: true, attributes: true });
+  updateSettingsDot();
+}
+
 // ---- Init ----
 const savedPrefs = loadPrefs();
 freshInstall = !savedPrefs;
@@ -1775,6 +1806,7 @@ loadDevices();
 setInterval(pollSys, 2000);
 window.addEventListener('focus', pollSys);
 $('refreshBtn').addEventListener('click', loadDevices);
-if (window.appInfo) window.appInfo.version().then(v => { $('appFooter').textContent = 'Olive ' + v.replace(/\.0$/, ''); }).catch(() => {});
+if (window.appInfo) window.appInfo.version().then(v => { $('appVersion').textContent = 'Olive ' + v.replace(/\.0$/, ''); }).catch(() => {});
+bindSettings();
 let deviceChangeTimer = null;
 navigator.mediaDevices.addEventListener('devicechange', () => { clearTimeout(deviceChangeTimer); deviceChangeTimer = setTimeout(loadDevices, 400); });

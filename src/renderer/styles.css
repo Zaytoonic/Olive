@@ -29,12 +29,17 @@ button, select, input { font: inherit; color: inherit; }
 /* ---- Toolbar ---- */
 .toolbar {
   position: sticky; top: 0; z-index: 10;
-  display: flex; align-items: center; gap: 12px;
-  padding: 8px 16px; min-height: 61px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px 6px 16px; min-height: 52px;
   background: var(--surface);
   border-bottom: 1px solid var(--hairline);
 }
-h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+.logo { width: 26px; height: 26px; border-radius: 7px; flex: none; }
+h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+.settings-btn { position: relative; margin-left: auto; width: 40px; height: 40px; }
+.settings-btn svg { width: 21px; height: 21px; }
+.dot { position: absolute; top: 7px; right: 7px; width: 9px; height: 9px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 0 2px var(--surface); }
+.dot[hidden] { display: none; }
 
 .icon-btn {
   width: 44px; height: 44px; border-radius: 9999px; border: 0; background: transparent;
@@ -52,7 +57,13 @@ main { flex: 1; display: flex; gap: 16px; padding: 16px; min-height: 0; }
 @container (min-width: 780px) {
   .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; align-items: start; }
 }
-footer { padding: 8px 16px; font-size: 12px; color: var(--text-2); border-top: 1px solid var(--hairline); }
+
+/* Thin scrollbars that stay out of the way */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; }
+::-webkit-scrollbar-thumb { background: #3a3935; border-radius: 9999px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: #55534d; }
 
 .group-title { font-size: 13px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); margin: 24px 16px 8px; }
 
@@ -230,4 +241,44 @@ select {
 
 @media (max-width: 860px) {
   #eqCurve { height: 180px; }
+}
+
+/* ---- Small on/off chip (the noise gate's Auto) ---- */
+.chip-toggle { position: relative; display: inline-flex; cursor: pointer; }
+.chip-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.chip-toggle span {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.02em; padding: 5px 12px; border-radius: 9999px;
+  background: var(--tile); color: var(--text-2); transition: background 100ms ease-out, color 100ms ease-out;
+}
+.chip-toggle:hover span { background: #3c3b36; }
+.chip-toggle input:checked + span { background: var(--accent); color: #fff; }
+.chip-toggle input:focus-visible + span { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+
+/* ---- Settings panel: slides in from the right over a dimmed window ---- */
+.scrim {
+  position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.55);
+  opacity: 0; visibility: hidden; transition: opacity 180ms ease-out, visibility 0s 180ms;
+}
+.scrim.open { opacity: 1; visibility: visible; transition: opacity 180ms ease-out; }
+.settings {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 21; width: min(440px, 100vw);
+  display: flex; flex-direction: column; background: var(--canvas);
+  border-left: 1px solid var(--hairline); box-shadow: -12px 0 40px rgba(0, 0, 0, 0.5);
+  transform: translateX(100%); visibility: hidden; transition: transform 200ms ease-out, visibility 0s 200ms;
+}
+.settings.open { transform: none; visibility: visible; transition: transform 200ms ease-out; }
+.settings:focus { outline: none; }
+.icon-btn:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
+.settings-head {
+  display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 6px 8px 6px 20px;
+  background: var(--surface); border-bottom: 1px solid var(--hairline);
+}
+.settings-head h2 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+.settings-head .icon-btn { width: 40px; height: 40px; }
+.settings-body { flex: 1; overflow: auto; padding: 0 16px 16px; }
+.settings-body > .group-title:first-child { margin-top: 18px; }
+.settings .row-end { gap: 10px; }
+.about { margin: 20px 0 4px; text-align: center; font-size: 12px; color: var(--text-2); }
+@media (prefers-reduced-motion: reduce) {
+  .scrim, .scrim.open, .settings, .settings.open { transition: none; }
 }

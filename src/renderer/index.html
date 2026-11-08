@@ -8,7 +8,12 @@
 </head>
 <body>
   <header class="toolbar">
+    <img class="logo" src="../../assets/icon.png" alt="" width="28" height="28">
     <h1>Olive</h1>
+    <button id="settingsBtn" type="button" class="icon-btn settings-btn" title="Settings" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="settingsPanel">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span id="settingsDot" class="dot" hidden></span>
+    </button>
   </header>
 
   <main>
@@ -77,19 +82,40 @@
           <div class="hint" id="volumeHint"></div>
         </div>
         <div class="row stack control">
-          <div class="row-head"><label for="gate" class="row-title">Noise gate</label><span id="gateVal" class="value">Auto</span></div>
-          <input type="range" id="gate" min="-60" max="-10" value="-45" disabled>
-          <div class="hint" id="gateHint">Mutes you when you're quieter than this</div>
-        </div>
-        <div class="row toggle-row">
-          <div>
-            <div class="row-title">Automatic noise gate</div>
-            <div class="hint">Off: use the slider above to set a volume level by hand</div>
+          <div class="row-head">
+            <label for="gate" class="row-title">Noise gate</label>
+            <div class="row-end">
+              <span id="gateVal" class="value">Auto</span>
+              <label class="chip-toggle" title="Auto: the gate follows your voice and background noise. Off: set the level by hand with the slider"><input type="checkbox" id="gateAuto" checked><span>Auto</span></label>
+            </div>
           </div>
-          <label class="switch" title="Set the noise gate threshold automatically"><input type="checkbox" id="gateAuto" checked><span></span></label>
+          <input type="range" id="gate" min="-60" max="-10" value="-45" disabled aria-label="Noise gate level">
+          <div class="hint" id="gateHint">Mutes you when you're quieter than this</div>
         </div>
       </div>
 
+      <h3 class="group-title">Processing</h3>
+      <div class="group">
+        <div class="row card">
+          <div class="row-head">
+            <span class="row-title">Noise reduction</span>
+            <div class="row-end"><span class="value" id="nrVal"></span><label class="switch" title="Automatic noise reduction"><input type="checkbox" id="nrToggle" checked><span></span></label></div>
+          </div>
+          <input type="range" id="nrAmount" min="0" max="100" value="100" aria-label="Noise reduction strength">
+          <div class="hint" id="nrHint">On</div>
+        </div>
+        <div class="row card comp">
+          <div class="row-head">
+            <span class="row-title">Compressor / auto-level</span>
+            <div class="row-end"><span class="value" id="compVal"></span><label class="switch" title="Even out your volume"><input type="checkbox" id="compToggle"><span></span></label></div>
+          </div>
+          <input type="range" id="compAmount" min="0" max="100" value="50" disabled aria-label="Compressor strength">
+          <div class="hint" id="compHint">Off: your volume goes out as-is</div>
+        </div>
+      </div>
+      </div>
+
+      <div class="col">
       <h3 class="group-title">Output</h3>
       <div class="group">
         <div class="row toggle-row send-row">
@@ -111,33 +137,6 @@
           </div>
           <label class="switch" title="Mix left and right into one channel"><input type="checkbox" id="monoToggle"><span></span></label>
         </div>
-        <div class="row stack control">
-          <label for="outputSelect" class="row-title">Listen and mute sounds play on</label>
-          <select id="outputSelect" class="wide-select" title="Where you hear yourself and the mute sounds. Discord doesn't hear either."></select>
-          <div class="hint notice" id="outputHint"></div>
-        </div>
-      </div>
-
-      </div>
-      <div class="col">
-      <h3 class="group-title">Processing</h3>
-      <div class="group">
-        <div class="row card">
-          <div class="row-head">
-            <span class="row-title">Noise reduction</span>
-            <div class="row-end"><span class="value" id="nrVal"></span><label class="switch" title="Automatic noise reduction"><input type="checkbox" id="nrToggle" checked><span></span></label></div>
-          </div>
-          <input type="range" id="nrAmount" min="0" max="100" value="100" aria-label="Noise reduction strength">
-          <div class="hint" id="nrHint">On</div>
-        </div>
-        <div class="row card comp">
-          <div class="row-head">
-            <span class="row-title">Compressor / auto-level</span>
-            <div class="row-end"><span class="value" id="compVal"></span><label class="switch" title="Even out your volume"><input type="checkbox" id="compToggle"><span></span></label></div>
-          </div>
-          <input type="range" id="compAmount" min="0" max="100" value="50" disabled aria-label="Compressor strength">
-          <div class="hint" id="compHint">Off: your volume goes out as-is</div>
-        </div>
         <div class="row card">
           <div class="row-head">
             <span class="row-title">Mic monitoring</span>
@@ -146,71 +145,10 @@
           <input type="range" id="monVol" min="0" max="100" value="80" disabled aria-label="Monitoring level">
           <div class="hint" id="monHint">Off: you won't hear yourself</div>
         </div>
-      </div>
-
-      <h3 class="group-title">App</h3>
-      <div class="group">
-        <div class="row toggle-row">
-          <div>
-            <div class="row-title">Mute hotkey</div>
-            <div class="hint" id="muteKeyHint">Ctrl+Alt+M mutes your mic from anywhere</div>
-          </div>
-          <div class="row-end">
-            <button type="button" id="muteKeyChange" class="pill small" title="Choose a different shortcut">Change</button>
-            <label class="switch" title="Toggle mute with this shortcut, even when this window is hidden"><input type="checkbox" id="muteKeyToggle" checked><span></span></label>
-          </div>
-        </div>
-        <div class="row card">
-          <div class="row-head">
-            <span class="row-title">Mute sounds</span>
-            <div class="row-end"><span class="value" id="soundVal"></span><label class="switch" title="Play a short sound when you mute or unmute"><input type="checkbox" id="soundToggle" checked><span></span></label></div>
-          </div>
-          <input type="range" id="soundVol" min="5" max="100" value="100" aria-label="Mute sound volume">
-          <div class="hint" id="soundHint"></div>
-        </div>
-        <div class="row toggle-row">
-          <div>
-            <div class="row-title">Muted badge on screen</div>
-            <div class="hint" id="badgeHint"></div>
-          </div>
-          <div class="row-end">
-            <select id="badgeCorner" title="Where the badge appears" aria-label="Badge position">
-              <option value="top-left">Top left</option>
-              <option value="top-center">Top middle</option>
-              <option value="top-right">Top right</option>
-              <option value="bottom-left">Bottom left</option>
-              <option value="bottom-right">Bottom right</option>
-            </select>
-            <label class="switch" title="Show a small Muted badge over other apps while you're muted"><input type="checkbox" id="badgeToggle" checked><span></span></label>
-          </div>
-        </div>
-        <div class="row toggle-row">
-          <div>
-            <div class="row-title">Push to talk</div>
-            <div class="hint" id="pttHint">Off: your mic is open unless you mute it</div>
-          </div>
-          <div class="row-end">
-            <button type="button" id="pttChange" class="pill small" title="Choose the key or mouse button to hold">Choose key</button>
-            <label class="switch" title="Only send your voice while a key is held"><input type="checkbox" id="pttToggle"><span></span></label>
-          </div>
-        </div>
-        <div class="row toggle-row">
-          <div>
-            <div class="row-title">Updates</div>
-            <div class="hint" id="updateHint">Asks GitHub once a day if there's a new version</div>
-          </div>
-          <div class="row-end">
-            <button type="button" id="updateNotes" class="pill small" hidden>What's new</button>
-            <button type="button" id="updateBtn" class="pill small">Check now</button>
-            <label class="switch" title="Check for new versions automatically"><input type="checkbox" id="updateAuto" checked><span></span></label>
-          </div>
-        </div>
-        <div class="row toggle-row">
-          <div>
-            <div class="row-title">Start with Windows</div>
-            <div class="hint" id="startupHint">Opens hidden in the tray when you log in</div>
-          </div>
-          <label class="switch" title="Launch Olive when you log in"><input type="checkbox" id="startupToggle"><span></span></label>
+        <div class="row stack control">
+          <label for="outputSelect" class="row-title">Listen and mute sounds play on</label>
+          <select id="outputSelect" class="wide-select" title="Where you hear yourself and the mute sounds. Discord doesn't hear either."></select>
+          <div class="hint notice" id="outputHint"></div>
         </div>
       </div>
       </div>
@@ -255,7 +193,86 @@
       </div>
     </section>
   </main>
-  <footer id="appFooter">Olive</footer>
+
+  <div id="settingsScrim" class="scrim"></div>
+  <aside id="settingsPanel" class="settings" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1">
+    <div class="settings-head">
+      <h2 id="settingsTitle">Settings</h2>
+      <button id="settingsClose" type="button" class="icon-btn" title="Close (Esc)" aria-label="Close settings">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><line x1="5" y1="5" x2="15" y2="15"/><line x1="15" y1="5" x2="5" y2="15"/></svg>
+      </button>
+    </div>
+    <div class="settings-body">
+      <h3 class="group-title">Mute &amp; talk</h3>
+      <div class="group">
+        <div class="row toggle-row">
+          <div>
+            <div class="row-title">Mute hotkey</div>
+            <div class="hint" id="muteKeyHint">Ctrl+Alt+M mutes your mic from anywhere</div>
+          </div>
+          <div class="row-end">
+            <button type="button" id="muteKeyChange" class="pill small" title="Choose a different shortcut">Change</button>
+            <label class="switch" title="Toggle mute with this shortcut, even when this window is hidden"><input type="checkbox" id="muteKeyToggle" checked><span></span></label>
+          </div>
+        </div>
+        <div class="row toggle-row">
+          <div>
+            <div class="row-title">Push to talk</div>
+            <div class="hint" id="pttHint">Off: your mic is open unless you mute it</div>
+          </div>
+          <div class="row-end">
+            <button type="button" id="pttChange" class="pill small" title="Choose the key or mouse button to hold">Choose key</button>
+            <label class="switch" title="Only send your voice while a key is held"><input type="checkbox" id="pttToggle"><span></span></label>
+          </div>
+        </div>
+        <div class="row card">
+          <div class="row-head">
+            <span class="row-title">Mute sounds</span>
+            <div class="row-end"><span class="value" id="soundVal"></span><label class="switch" title="Play a short sound when you mute or unmute"><input type="checkbox" id="soundToggle" checked><span></span></label></div>
+          </div>
+          <input type="range" id="soundVol" min="5" max="100" value="100" aria-label="Mute sound volume">
+          <div class="hint" id="soundHint"></div>
+        </div>
+        <div class="row card">
+          <div class="row-head">
+            <span class="row-title">Muted badge on screen</span>
+            <label class="switch" title="Show a small Muted badge over other apps while you're muted"><input type="checkbox" id="badgeToggle" checked><span></span></label>
+          </div>
+          <select id="badgeCorner" class="wide-select" title="Where the badge appears" aria-label="Badge position">
+            <option value="top-left">Top left</option>
+            <option value="top-center">Top middle</option>
+            <option value="top-right">Top right</option>
+            <option value="bottom-left">Bottom left</option>
+            <option value="bottom-right">Bottom right</option>
+          </select>
+          <div class="hint" id="badgeHint"></div>
+        </div>
+      </div>
+
+      <h3 class="group-title">App</h3>
+      <div class="group">
+        <div class="row toggle-row">
+          <div>
+            <div class="row-title">Updates</div>
+            <div class="hint" id="updateHint">Asks GitHub once a day if there's a new version</div>
+          </div>
+          <div class="row-end">
+            <button type="button" id="updateNotes" class="pill small" hidden>What's new</button>
+            <button type="button" id="updateBtn" class="pill small">Check now</button>
+            <label class="switch" title="Check for new versions automatically"><input type="checkbox" id="updateAuto" checked><span></span></label>
+          </div>
+        </div>
+        <div class="row toggle-row">
+          <div>
+            <div class="row-title">Start with Windows</div>
+            <div class="hint" id="startupHint">Opens hidden in the tray when you log in</div>
+          </div>
+          <label class="switch" title="Launch Olive when you log in"><input type="checkbox" id="startupToggle"><span></span></label>
+        </div>
+      </div>
+      <p class="about"><span id="appVersion">Olive</span> · MIT licence</p>
+    </div>
+  </aside>
   <script src="renderer.js"></script>
 </body>
 </html>
