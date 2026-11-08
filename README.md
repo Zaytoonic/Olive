@@ -2,10 +2,17 @@
 <h1 align="center">Olive</h1>
 <p align="center">A microphone manager for Windows, inspired by SteelSeries Sonar's mic tab.</p>
 <p align="center"><a href="https://github.com/Zaytoonic/Olive/releases/latest"><strong>Download the latest version</strong></a></p>
+<p align="center">
+  <a href="https://github.com/Zaytoonic/Olive/releases/latest"><img src="https://img.shields.io/github/v/release/Zaytoonic/Olive?color=6B7F3A&label=version" alt="Latest version"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-6B7F3A" alt="Windows 10 and 11">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Zaytoonic/Olive?color=6B7F3A" alt="MIT licence"></a>
+</p>
 
 ![The Olive window](docs/screenshot.png)
 
 ## Features
+<img src="docs/settings.png" align="right" width="300" alt="The Settings panel">
+
 - **Voice cleanup:** RNNoise noise reduction with adjustable strength, and a noise gate that opens on your voice.
 - **Compressor** to even out your volume.
 - **Six-band EQ** with a low cut and presets, saved separately for each mic, and a hold-to-compare button.
@@ -15,11 +22,14 @@
 - **Listen** to hear your processed mic live, on the output device you choose.
 - **Test mic** records 5 seconds of exactly what Olive sends to Discord, then plays it back to you.
 - **Runs in the tray**, can start with Windows, and updates itself in one click.
+- **Settings** you set once (hotkeys, push to talk, mute sounds, the badge, updates) live behind the gear, out of the way. A dot on the gear tells you when something there needs you.
+
+<br clear="right">
 
 ## Installing
 Download `Olive-Setup-<version>.exe` from [Releases](https://github.com/Zaytoonic/Olive/releases/latest) and run it. It installs for your Windows account, with no admin rights needed, and adds a Start menu shortcut and an uninstaller. The app is not code-signed yet, so Windows may say "Windows protected your PC": click **More info**, then **Run anyway**.
 
-Olive checks GitHub once a day for a new version and tells you if there is one, and you can turn the check off. Nothing is downloaded until you click **Install**. Olive then downloads the new installer and checks it against the release's SHA-256 checksum before running it. It closes for a few seconds while the update installs, then opens again.
+Olive checks GitHub once a day for a new version, and the gear shows a dot when there is one. To update, open **Settings → Updates** and click **Install**; you can also turn the daily check off there. Nothing is downloaded until you click **Install**. Olive then downloads the new installer and checks it against the release's SHA-256 checksum before running it. It closes for a few seconds while the update installs, then opens again.
 
 ## Using it with Discord
 1. Install [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) and restart your PC.
@@ -67,7 +77,7 @@ src/renderer/    the window
   recorder-worklet.js  records the mic test
   vendor/          RNNoise compiled to WebAssembly (@jitsi/rnnoise-wasm 0.2.1, Apache-2.0)
 assets/          icons and mute sounds, both made from code (tools/make-icons.js, tools/make-sounds.js)
-docs/            the screenshot above
+docs/            the screenshots above
 tools/           build, packaging, signing, icon and sound scripts
   audio-test/      npm run test:audio
   installer/       the installer and uninstaller source, and npm run test:installer
