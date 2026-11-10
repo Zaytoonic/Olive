@@ -172,6 +172,18 @@ function voiceChecks() {
     const { pct, silent } = openPct(runVoice(src, 100, 1), runVoice(src, 100, 0));
     check(`gate stays shut on ${name}`, pct <= limit, `open ${f1(pct)}% (limit ${limit}%)${silent ? `, of the ${f1(100 - silent)}% of the time noise reduction left anything` : ''}`);
   }
+  // After a minute or so the network trusts a voice less than when it started, and a gate that needs high confidence
+  // throughout then cuts words (it let through 50% of this file's loudest speech). Scored on the 4th pass through the file.
+  const fx = makeFixture(), p = loadVoice(), prm = { strength: new Float32Array([100]), gate: new Float32Array([1]) };
+  let said = 0, kept = 0;
+  for (let pass = 0; pass < 4; pass++) {
+    for (let i = 0; i + 128 <= fx.samples.length; i += 128) {
+      p.process([[fx.samples.subarray(i, i + 128)]], [[new Float32Array(128)]], prm);
+      const seg = fx.segmentAt(i / SR);
+      if (pass === 3 && seg.kind === 'voice' && seg.level === fx.voiceLevels[0]) { said++; if (p.open) kept++; }
+    }
+  }
+  check(`speech still opens the gate after ${Math.round(3 * fx.seconds)} s of running`, kept / said >= 0.9, `${f1(100 * kept / said)}% of the speech at ${fx.voiceLevels[0]} dB let through (at least 90%)`);
 }
 
 // ---- The test copy of the app ----
@@ -373,7 +385,7 @@ function analyseGate(cap, fixture) {
 }
 
 const ONLY = process.argv[2];
-const wanted = part => !ONLY || ONLY === part;
+const wanted = part => !ONLY || ONLY.split(',').includes(part);   // one part, or several: nr,gate
 
 async function liveChecks(profile, wav, fixture) {
   console.log('\nThe app, on a fake mic');
@@ -387,6 +399,24 @@ async function liveChecks(profile, wav, fixture) {
     check('mic is captured raw', info.suppression === false, `Chromium noise suppression reports ${info.suppression}`);
     check('the voice engine is running', info.engine === true, `voice engine active: ${info.engine}`);
     check('nothing reaches the real cable', info.sendConnected === false, `send chain connected: ${info.sendConnected}`);
+
+    if (wanted('gate')) {
+      // Right after start, before the other parts: once the network has run a minute it treats the test file's synthetic
+      // speech as noise and turns it down about 12 dB (real speech it leaves alone: Windows TTS speech loses 0.5 dB either way).
+      // The gate's long-running behaviour is checked offline instead ("speech still opens the gate after ...").
+      console.log('\nWhole chain, 30 s of noise and speech: noise reduction 100%, compressor on');
+      await copy.call(s => { state.nr = true; state.nrAmount = s; applyNr(); }, 100);
+      await sleep(7000);                 // the gate's noise floor has a 6 s memory
+      const cap = await copy.call(pageCapture, 30);
+      check('the audio clock keeps up after an output device was chosen', cap.n >= 30 * cap.sr * 0.98, `${cap.n} of ${30 * cap.sr} samples in 30 s`);
+      const g = analyseGate(cap, fixture);
+      const placed = Math.abs(g.micNoise - NOISE_DB) < 3 && g.voice[-25].mic > g.voice[-35].mic + 5 && g.voice[-35].mic > g.voice[-42].mic + 2;
+      check('capture lines up with the test file', placed, `mic levels: noise ${f1(g.micNoise)}, speech ${[-25, -35, -42].map(l => f1(g.voice[l].mic)).join(' / ')} dB`);
+      console.log(`        noise going in ${f1(g.micNoise)} dB, coming out ${f1(g.noise.endLevel)} dB`);
+      check('gate shuts on noise', g.noise.openPct <= 30, `open ${f1(g.noise.openPct)}% of ${f1(g.noise.seconds)} s, ${g.noise.flips} flips`);
+      check('speech reaches the end of the chain', g.voice[-25].openPct >= 80 && g.voice[-25].endLevel > g.micNoise + 10, `open ${f1(g.voice[-25].openPct)}%, output ${f1(g.voice[-25].endLevel)} dB`);
+      check('output does not clip', g.peakDb < -0.5, `peak ${f1(g.peakDb)} dB`);
+    }
 
     if (wanted('app')) {
       console.log('\nA new install');
@@ -730,21 +760,6 @@ async function liveChecks(profile, wav, fixture) {
       const r = await copy.call(pageNrLevels, s), drop = r.raw - r.out;
       check(`${s}% lowers steady noise by ${min}-${max} dB`, drop >= min && drop <= max && (!drops.length || drop > drops[drops.length - 1]), `measured ${f1(drop)} dB (${f1(r.raw)} -> ${f1(r.out)})`);
       drops.push(drop);
-    }
-
-    if (wanted('gate')) {
-      console.log('\nWhole chain, 30 s of noise and speech: noise reduction 100%, compressor on');
-      await copy.call(s => { state.nr = true; state.nrAmount = s; applyNr(); }, 100);
-      await sleep(7000);                 // the gate's noise floor has a 6 s memory
-      const cap = await copy.call(pageCapture, 30);
-      check('the audio clock keeps up after an output device was chosen', cap.n >= 30 * cap.sr * 0.98, `${cap.n} of ${30 * cap.sr} samples in 30 s`);
-      const g = analyseGate(cap, fixture);
-      const placed = Math.abs(g.micNoise - NOISE_DB) < 3 && g.voice[-25].mic > g.voice[-35].mic + 5 && g.voice[-35].mic > g.voice[-42].mic + 2;
-      check('capture lines up with the test file', placed, `mic levels: noise ${f1(g.micNoise)}, speech ${[-25, -35, -42].map(l => f1(g.voice[l].mic)).join(' / ')} dB`);
-      console.log(`        noise going in ${f1(g.micNoise)} dB, coming out ${f1(g.noise.endLevel)} dB`);
-      check('gate shuts on noise', g.noise.openPct <= 30, `open ${f1(g.noise.openPct)}% of ${f1(g.noise.seconds)} s, ${g.noise.flips} flips`);
-      check('speech reaches the end of the chain', g.voice[-25].openPct >= 80 && g.voice[-25].endLevel > g.micNoise + 10, `open ${f1(g.voice[-25].openPct)}%, output ${f1(g.voice[-25].endLevel)} dB`);
-      check('output does not clip', g.peakDb < -0.5, `peak ${f1(g.peakDb)} dB`);
     }
 
     if (wanted('mute')) {

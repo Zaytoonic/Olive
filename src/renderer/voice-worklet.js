@@ -45,9 +45,12 @@ const FRAME = 480;
 const SCALE = 32768;
 const NET_DELAY = 960;                 // the network's own delay, on top of collecting a frame (measured by correlation)
 const DRY_DELAY = FRAME + NET_DELAY;
-// The network's voice probability that opens the gate. This model sometimes scores noise near 0.5 (the old one never
-// did), and each such frame held the gate open for HOLD_MS; at 0.8 noise stays shut and every word start still opens it.
+// The network's voice probability that opens the gate, and the lower one that keeps it open once you're talking.
+// This model sometimes scores noise near 0.5 (the old one never did), so opening needs 0.8: noise stays shut and word starts
+// still open it. But after the network has run for a while it can score a voice in the 0.5-0.8 range mid-phrase
+// (the test file's speech settles near 0.64), and a single 0.8 rule then cut half of it; holding open from 0.5 keeps it.
 const VOICE_ON = 0.8;
+const VOICE_KEEP = 0.5;
 const HOLD_MS = 300;
 const RISE_MS = 2, FALL_MS = 80;
 
@@ -126,7 +129,7 @@ class VoiceCleanup extends AudioWorkletProcessor {
       }
       if (voice >= 0) {
         this.frameVoice = voice;
-        if (voice >= VOICE_ON) this.hold = this.holdSamples;
+        if (voice >= (this.hold > 0 ? VOICE_KEEP : VOICE_ON)) this.hold = this.holdSamples;
       }
       if (this.hold > 0) this.hold--;
       const target = !gateOn || this.hold > 0 ? 1 : 0;
