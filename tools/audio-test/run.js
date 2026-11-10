@@ -141,12 +141,13 @@ function gateChecks(fixture) {
 // ---- The voice engine (RNNoise), offline ----
 const VOICE_DELAY = 1440;
 function loadVoice() {
-  const ctx = vm.createContext({ AudioWorkletProcessor: class { constructor() { this.port = { postMessage() {} }; } }, sampleRate: SR, Math, Float32Array, Uint16Array, Infinity, WebAssembly, console, setTimeout, clearTimeout, atob: t => Buffer.from(t, 'base64').toString('latin1'), registerProcessor: (_, c) => { ctx.Proc = c; } });
+  const ctx = vm.createContext({ AudioWorkletProcessor: class { constructor() { this.port = { postMessage() {} }; } }, sampleRate: SR, Math, Float32Array, Uint32Array, Infinity, WebAssembly, Error, console, registerProcessor: (_, c) => { ctx.Proc = c; } });
   ctx.globalThis = ctx;
-  vm.runInContext(fs.readFileSync(path.join(RENDERER, 'vendor', 'rnnoise-sync.js'), 'utf8').replace('import.meta.url', '""').replace(/export default createRNNWasmModuleSync;\s*$/, 'globalThis.createRNN = createRNNWasmModuleSync;'), ctx);
-  vm.runInContext(fs.readFileSync(path.join(RENDERER, 'voice-worklet.js'), 'utf8').replace(/import createRNNWasmModuleSync from [^\n]*\n/, 'const createRNNWasmModuleSync = globalThis.createRNN;\n'), ctx);
-  return new ctx.Proc();
+  vm.runInContext(fs.readFileSync(path.join(RENDERER, 'voice-worklet.js'), 'utf8'), ctx);
+  voiceWasm = voiceWasm || new WebAssembly.Module(fs.readFileSync(path.join(RENDERER, 'vendor', 'rnnoise.wasm')));
+  return new ctx.Proc({ processorOptions: { wasm: voiceWasm } });
 }
+let voiceWasm = null;
 function runVoice(input, strength, gate) {
   const p = loadVoice(), out = new Float32Array(input.length), params = { strength: new Float32Array([strength]), gate: new Float32Array([gate]) };
   for (let i = 0; i + 128 <= input.length; i += 128) { const o = new Float32Array(128); p.process([[input.subarray(i, i + 128)]], [[o]], params); out.set(o, i); }
@@ -164,10 +165,12 @@ function voiceChecks() {
     check(`${name} comes down`, drops[1] >= min60 && drops[2] >= min100, `drop at 25/60/100%: ${drops.map(f1).join(' / ')} dB (at least ${min60} at 60%, ${min100} at 100%)`);
   }
   // The gate's job: shut on noise, even gusts, with no volume threshold to fool.
-  const openPct = (out, ref) => { let o = 0, c = 0; for (let i = SR * 2; i + 960 + D < n; i += 960) { let a = 0, b = 0; for (let k = 0; k < 960; k++) { a += out[i + D + k] ** 2; b += ref[i + D + k] ** 2; } c++; if (toDb(a) >= toDb(b) - 20) o++; } return 100 * o / c; };
+  // Windows the noise reduction alone already took below -110 dB (20 dB above toDb's floor) have nothing left to gate,
+  // and both sides sitting at the floor would look "open"; they're skipped and counted.
+  const openPct = (out, ref) => { let o = 0, c = 0, silent = 0; for (let i = SR * 2; i + 960 + D < n; i += 960) { let a = 0, b = 0; for (let k = 0; k < 960; k++) { a += out[i + D + k] ** 2; b += ref[i + D + k] ** 2; } if (toDb(b) < -110) { silent++; continue; } c++; if (toDb(a) >= toDb(b) - 20) o++; } return { pct: 100 * o / Math.max(1, c), silent: 100 * silent / (silent + c) }; };
   for (const [name, src, limit] of [['steady noise', noise, 5], ['gusty fan', fan, 10]]) {
-    const pct = openPct(runVoice(src, 100, 1), runVoice(src, 100, 0));
-    check(`gate stays shut on ${name}`, pct <= limit, `open ${f1(pct)}% (limit ${limit}%)`);
+    const { pct, silent } = openPct(runVoice(src, 100, 1), runVoice(src, 100, 0));
+    check(`gate stays shut on ${name}`, pct <= limit, `open ${f1(pct)}% (limit ${limit}%)${silent ? `, of the ${f1(100 - silent)}% of the time noise reduction left anything` : ''}`);
   }
 }
 

@@ -762,6 +762,7 @@ function chainAmplitude(ch, meter = ch.meter) {
 // Preferred: gate-worklet.js on the audio thread (sample-accurate, 5 ms look-ahead, 150 ms hold).
 // Fallback if it can't load: gate from the main thread below (reacts every 20 ms, can clip word starts).
 const GATE_WORKLET_URL = 'app://local/gate-worklet.js', NR_WORKLET_URL = 'app://local/nr-worklet.js', VOICE_WORKLET_URL = 'app://local/voice-worklet.js';
+const RNNOISE_WASM_URL = 'app://local/rnnoise.wasm';
 const gateModules = new WeakMap(), nrModules = new WeakMap();
 function loadGateModule(ctx) {
   if (!gateModules.has(ctx)) gateModules.set(ctx, ctx.audioWorklet.addModule(GATE_WORKLET_URL));
@@ -802,12 +803,23 @@ function detachGate(ch) {                         // worklet crashed: fall back 
 }
 // ---- Voice cleanup ----
 // voice-worklet.js: RNNoise plus a gate that opens on detected voice. If it can't run, nr-worklet.js and the volume gate remain.
+// The network (vendor/rnnoise.wasm) is compiled once here and handed to each worklet, which can't fetch files itself.
+let rnnoiseWasm = null;
+function loadRnnoise() {
+  if (!rnnoiseWasm) {
+    rnnoiseWasm = fetch(RNNOISE_WASM_URL)
+      .then(r => { if (!r.ok) throw new Error('rnnoise.wasm: ' + r.status); return r.arrayBuffer(); })
+      .then(bytes => WebAssembly.compile(bytes));
+    rnnoiseWasm.catch(() => { rnnoiseWasm = null; });    // try again next time instead of keeping the failure
+  }
+  return rnnoiseWasm;
+}
 async function attachVoice(ch) {
   try {
     if (ch.ctx.sampleRate !== 48000) throw new Error('needs 48 kHz, got ' + ch.ctx.sampleRate);
-    await ch.ctx.audioWorklet.addModule(VOICE_WORKLET_URL);
+    const [wasm] = await Promise.all([loadRnnoise(), ch.ctx.audioWorklet.addModule(VOICE_WORKLET_URL)]);
     if (ch.ctx.state === 'closed') return;
-    const node = new AudioWorkletNode(ch.ctx, 'voice-cleanup', { numberOfInputs: 1, numberOfOutputs: 1, parameterData: { strength: nrStrengthNow(), gate: state.gateAuto ? 1 : 0 } });
+    const node = new AudioWorkletNode(ch.ctx, 'voice-cleanup', { numberOfInputs: 1, numberOfOutputs: 1, processorOptions: { wasm }, parameterData: { strength: nrStrengthNow(), gate: state.gateAuto ? 1 : 0 } });
     node.port.onmessage = e => { if (state.gateAuto && typeof (e.data || {}).open === 'boolean') ch.gateIsOpen = e.data.open; };
     node.onprocessorerror = () => { console.warn('Voice cleanup crashed; using the older noise reduction'); detachNr(ch); ch.voice = null; ch.voiceFailed = true; routeChain(ch); attachNr(ch); shownGate = ''; refreshGateUi(); updateHints(); };
     ch.nr = node; ch.voice = node;

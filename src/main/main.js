@@ -22,14 +22,15 @@ const WORKLETS = {
   '/nr-worklet.js': path.join(RENDERER, 'nr-worklet.js'),
   '/voice-worklet.js': path.join(RENDERER, 'voice-worklet.js'),
   '/recorder-worklet.js': path.join(RENDERER, 'recorder-worklet.js'),
-  '/rnnoise-sync.js': path.join(RENDERER, 'vendor', 'rnnoise-sync.js')
+  '/rnnoise.wasm': path.join(RENDERER, 'vendor', 'rnnoise.wasm')
 };
 function serveWorklet(request) {
   const url = new URL(request.url);
   const file = url.host === 'local' ? WORKLETS[url.pathname] : undefined;
   if (!file) return new Response('Not found', { status: 404 });
+  const type = file.endsWith('.wasm') ? 'application/wasm' : 'text/javascript';
   return fs.promises.readFile(file)
-    .then(data => new Response(data, { headers: { 'content-type': 'text/javascript', 'access-control-allow-origin': '*' } }))
+    .then(data => new Response(data, { headers: { 'content-type': type, 'access-control-allow-origin': '*' } }))
     .catch(() => new Response('Not found', { status: 404 }));
 }
 const { HelperClient } = require('./sysmic-client');

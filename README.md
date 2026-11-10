@@ -75,7 +75,7 @@ src/renderer/    the window
   gate-worklet.js  volume gate, for a gate set by hand or as the fallback
   nr-worklet.js    fallback noise reduction, if the voice engine can't start
   recorder-worklet.js  records the mic test
-  vendor/          RNNoise compiled to WebAssembly (@jitsi/rnnoise-wasm 0.2.1, Apache-2.0)
+  vendor/          RNNoise (xiph, Feb 2025 model) compiled to WebAssembly, from @shiguredo/rnnoise-wasm 2025.1.5
 assets/          icons and mute sounds, both made from code (tools/make-icons.js, tools/make-sounds.js)
 docs/            the screenshots above
 tools/           build, packaging, signing, icon and sound scripts
@@ -86,4 +86,4 @@ tools/           build, packaging, signing, icon and sound scripts
 The palette and icon are described in [DESIGN.md](DESIGN.md).
 
 ## Licence
-Olive is released under the [MIT licence](LICENSE): you can use, change and share it, as long as the copyright notice stays with it. The bundled RNNoise build in `src/renderer/vendor` keeps its own licence (Apache-2.0).
+Olive is released under the [MIT licence](LICENSE): you can use, change and share it, as long as the copyright notice stays with it. The bundled RNNoise build in `src/renderer/vendor` keeps its own licences (RNNoise: BSD; the WebAssembly build: Apache-2.0), in `rnnoise-LICENSE.txt`.

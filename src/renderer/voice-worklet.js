@@ -5,23 +5,58 @@
 // - Gate: opens on detected voice instead of volume, so a fan gust isn't mistaken for a word. It stays open HOLD_MS after
 //   the last voice, and because the network's audio lags its detection by a frame, it is already open when a word starts.
 // RNNoise only works at 48 kHz, and needs samples scaled to 16-bit range. At other rates audio passes through unchanged.
-import createRNNWasmModuleSync from 'app://local/rnnoise-sync.js';
+//
+// The network is vendor/rnnoise.wasm: xiph's RNNoise at commit 70f1d256 (Feb 2025) with its official model 0a8755f8,
+// compiled by @shiguredo/rnnoise-wasm 2025.1.5. That package's own loader can't run in an AudioWorklet, so the page
+// compiles the wasm and passes it in processorOptions.wasm, and startRnnoise below starts it. It asks for only these imports.
+function startRnnoise(module) {
+  let memory = null;
+  const { exports } = new WebAssembly.Instance(module, {
+    env: {
+      __assert_fail: () => { throw new Error('RNNoise assertion failed'); },
+      emscripten_resize_heap: size => {
+        const pages = Math.ceil(((size >>> 0) - memory.buffer.byteLength) / 65536);
+        try { memory.grow(pages); return 1; } catch { return 0; }
+      }
+    },
+    wasi_snapshot_preview1: {
+      fd_write: (fd, iov, count, written) => {         // RNNoise doesn't print; this only reports the bytes as taken
+        const u32 = new Uint32Array(memory.buffer);
+        let n = 0;
+        for (let i = 0; i < count; i++) n += u32[(iov >>> 2) + i * 2 + 1];
+        u32[written >>> 2] = n;
+        return 0;
+      }
+    }
+  });
+  memory = exports.memory;
+  exports.emscripten_stack_init();
+  exports.__wasm_call_ctors();
+  if (exports.rnnoise_get_frame_size() !== FRAME) throw new Error('unexpected RNNoise frame size');
+  return {
+    create: () => exports.rnnoise_create(0),           // 0: the built-in model
+    malloc: bytes => exports.malloc(bytes),
+    process: (net, out, inp) => exports.rnnoise_process_frame(net, out, inp),
+    heap: () => new Float32Array(memory.buffer)        // made again each time: growing the memory detaches the old view
+  };
+}
 
 const FRAME = 480;
 const SCALE = 32768;
 const NET_DELAY = 960;                 // the network's own delay, on top of collecting a frame (measured by correlation)
 const DRY_DELAY = FRAME + NET_DELAY;
-const VOICE_ON = 0.5;                  // network's voice probability that opens the gate
+// The network's voice probability that opens the gate. This model sometimes scores noise near 0.5 (the old one never
+// did), and each such frame held the gate open for HOLD_MS; at 0.8 noise stays shut and every word start still opens it.
+const VOICE_ON = 0.8;
 const HOLD_MS = 300;
 const RISE_MS = 2, FALL_MS = 80;
 
-const rnn = createRNNWasmModuleSync();
-
 class ChannelState {
-  constructor() {
-    this.net = rnn._rnnoise_create(0);
-    this.inPtr = rnn._malloc(FRAME * 4);
-    this.outPtr = rnn._malloc(FRAME * 4);
+  constructor(rnn) {
+    this.rnn = rnn;
+    this.net = rnn.create();
+    this.inPtr = rnn.malloc(FRAME * 4);
+    this.outPtr = rnn.malloc(FRAME * 4);
     this.input = new Float32Array(FRAME);
     this.filled = 0;
     this.wet = new Float32Array(DRY_DELAY + FRAME);    // cleaned audio waiting to go out; starts with a frame of silence
@@ -33,10 +68,10 @@ class ChannelState {
   // Runs the network on a full frame; returns its voice probability (0-1).
   run() {
     const inIdx = this.inPtr >> 2, outIdx = this.outPtr >> 2;
-    const heap = rnn.HEAPF32;                          // read again each time: the wasm memory may have grown
+    const heap = this.rnn.heap();
     for (let i = 0; i < FRAME; i++) heap[inIdx + i] = this.input[i] * SCALE;
-    const voice = rnn._rnnoise_process_frame(this.net, this.outPtr, this.inPtr);
-    const out = rnn.HEAPF32;
+    const voice = this.rnn.process(this.net, this.outPtr, this.inPtr);
+    const out = this.rnn.heap();
     for (let i = 0; i < FRAME; i++) {
       this.wet[this.wetWrite] = out[outIdx + i] / SCALE;
       this.wetWrite = (this.wetWrite + 1) % this.wet.length;
@@ -54,8 +89,10 @@ class VoiceCleanup extends AudioWorkletProcessor {
     ];
   }
 
-  constructor() {
+  constructor(options) {
     super();
+    // Throws if the wasm is missing or won't start; the page then sees a processor error and falls back.
+    this.rnn = startRnnoise(options.processorOptions.wasm);
     this.supported = sampleRate === 48000;
     this.channels = [];
     this.gain = 0;
@@ -78,7 +115,7 @@ class VoiceCleanup extends AudioWorkletProcessor {
     const strength = parameters.strength[0], gateOn = parameters.gate[0] >= 0.5;
     const dryGain = strength >= 100 ? 0 : Math.pow(10, -strength * 0.3 / 20);
     const wetGain = strength <= 0 ? 0 : 1 - dryGain;
-    while (this.channels.length < output.length) this.channels.push(new ChannelState());
+    while (this.channels.length < output.length) this.channels.push(new ChannelState(this.rnn));
     const n = output[0].length;
     for (let i = 0; i < n; i++) {
       let voice = -1;
