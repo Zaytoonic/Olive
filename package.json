@@ -8,6 +8,7 @@
     "prestart": "node tools/build-helper.js && vite build",
     "start": "electron .",
     "build:ui": "vite build",
+    "preview": "vite build && node tools/preview.js",
     "build": "node tools/build.js",
     "patch-exe": "node tools/patch-exe.js",
     "make-icons": "node tools/make-icons.js",

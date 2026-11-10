@@ -46,7 +46,7 @@ npm run patch-exe
 ```
 The app is then at `dist\Olive\Olive.exe`. Keep it in its folder. Closing the window hides it to the tray; to quit, right-click the tray icon.
 
-To run it from source instead, use `npm start`.
+To run it from source instead, use `npm start`. To try a change next to your installed Olive, use `npm run preview`: it opens a separate copy with your settings and Send to Discord off, so Discord never hears you twice.
 
 To build the installer, run `npm run installer`, which creates `dist\Olive-Setup-<version>.exe`. `npm run test:installer` tests it end to end, including an update from inside Olive, kept apart from your real install. To code-sign it, see the top of `tools/sign.js`.
 
