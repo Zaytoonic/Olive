@@ -49,9 +49,11 @@ h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
 .icon-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ---- Layout ---- */
-main { flex: 1; display: flex; gap: 16px; padding: 16px; min-height: 0; }
+main { flex: 1; display: flex; min-height: 0; }
 .panel { overflow: auto; min-height: 0; }
-.controls { flex: 1; padding-right: 4px; max-width: 1440px; container-type: inline-size; }
+/* The scroll area fills the window, so the scrollbar sits at the window's edge; the content is a
+   centred column, so a maximised or full-screen window doesn't stretch it or leave it hugging the left. */
+.controls { flex: 1; padding: 16px max(16px, calc((100% - 1240px) / 2)); scrollbar-gutter: stable; container-type: inline-size; }
 .columns { display: block; }
 .col { min-width: 0; }
 @container (min-width: 780px) {
