@@ -533,3 +533,4 @@ const engine = (() => {
     useSendContext
   };
 })();
+window.engine = engine;   // the React window's bundle reads it from here (a top-level const isn't a window property)
