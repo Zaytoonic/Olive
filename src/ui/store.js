@@ -316,7 +316,8 @@ function micError(err) {
 }
 const captureIsCurrent = () => engine.isCapturing(state.deviceId);
 
-export async function loadDevices() {
+export async function loadDevices(opts) {
+  if (!(opts && opts.retry)) startupRetries = 0;   // a start, refresh or device change: look for another minute
   setStatus('');
   let found = [];
   try {
@@ -356,7 +357,7 @@ export async function loadDevices() {
   retryWhileAudioStartsUp();
 }
 // Right after login, Windows audio can still be starting: no mics or no cable yet, and no event when they appear.
-// Keep looking for a minute, and stop as soon as everything is there.
+// Keep looking for a minute after that (or after any device change or refresh), and stop as soon as everything is there.
 let startupRetries = 0, startupRetryTimer = null;
 function retryWhileAudioStartsUp() {
   clearTimeout(startupRetryTimer);
@@ -366,7 +367,7 @@ function retryWhileAudioStartsUp() {
     return;
   }
   startupRetries++;
-  startupRetryTimer = setTimeout(loadDevices, 5000);
+  startupRetryTimer = setTimeout(() => loadDevices({ retry: true }), 5000);
 }
 
 // ---- Send to other apps (VB-Audio Virtual Cable) ----
