@@ -61,7 +61,7 @@ function bindControls() {
   $('listenBtn').addEventListener('click', () => setMonitor(!state.monitor));
   $('monoToggle').addEventListener('change', e => { state.mono = e.target.checked; applyMono(); });
   $('sendToggle').addEventListener('change', e => { sendWanted = e.target.checked; scheduleSave(); setSend(e.target.checked); });
-  $('monVol').addEventListener('input', e => { state.monitorVol = +e.target.value; updateMonitorGain(); updateHints(); });
+  $('monVol').addEventListener('input', e => { state.monitorVol = +e.target.value; engine.set({ monitorVol: state.monitorVol }); updateHints(); });
   $('compToggle').addEventListener('change', e => { state.comp = e.target.checked; $('compAmount').disabled = !state.comp; applyComp(); updateHints(); });
   $('compAmount').addEventListener('input', e => { state.compAmount = +e.target.value; applyComp(); updateHints(); });
 }
@@ -109,8 +109,7 @@ function setMutedUi(m) {
   $('meterFill').parentElement.classList.toggle('muted', state.muted);
   $('mutedBanner').hidden = !state.muted;
   $('meterFill').closest('.hero').classList.toggle('is-muted', state.muted);
-  updateMonitorGain();
-  updateSendGain();
+  syncTalking();
   updateSendStatus();
   if (window.appMute) window.appMute.setState(state.muted);
 }
@@ -123,149 +122,82 @@ function setMonitor(on) {
   b.textContent = on ? 'Listening' : 'Listen';
   b.setAttribute('aria-pressed', on);
   syncCompare();
-  syncChains();
-  updateMonitorGain();
+  engine.set({ monitor: on, monitorVol: state.monitorVol });
   updateHints();
 }
-function rampTo(param, value, tc = 0.02, ctx = audioCtx) {
-  if (!param || !ctx) return;
-  param.cancelScheduledValues(ctx.currentTime);
-  param.setTargetAtTime(value, ctx.currentTime, tc);
-}
-// All live processing chains: the main one (meter + Listen) and, when sending, the one feeding the cable.
-const chains = () => [eqNodes, sendNodes].filter(Boolean);
-// One running engine is enough unless you're listening: while sending, the send chain also drives the meter,
-// and the main chain sleeps (its engine used half the app's CPU just to feed a meter).
-const mainNeeded = () => state.monitor || !sendNodes;
-const meterChain = () => (mainNeeded() ? eqNodes : sendNodes);
-let srcLinked = false;
-function syncChains() {
-  if (!audioCtx || !eqNodes) return;
-  const need = mainNeeded();
-  if (need && audioCtx.state === 'suspended') audioCtx.resume();
-  if (srcNode && need && !srcLinked) { srcNode.connect(eqNodes.head); srcLinked = true; }
-  if (srcNode && !need && srcLinked) { try { srcNode.disconnect(eqNodes.head); } catch {} srcLinked = false; }
-  if (!need && audioCtx.state === 'running' && !testPlaying) audioCtx.suspend();   // a mic test plays back on this context
-  syncTicker();
-}
-// The timer runs while the window is showing (the meter), or when a chain needs the main-thread gate (which needs 20 ms).
-let tickTimer = null, tickMs = 0;
+// The meter's timer runs only while the window is showing. The audio needs none here: the engine runs its own backup gate.
+let tickTimer = null;
 function syncTicker() {
-  const mainThreadGate = chains().some(ch => !ch.gate);
-  const ms = mainThreadGate ? 20 : !isHidden() || !analyser ? 33 : 0;
-  if (ms === tickMs) return;
+  const run = !isHidden();
+  if (run === !!tickTimer) return;
   clearInterval(tickTimer);
-  tickMs = ms;
   tickTimer = null;
-  if (ms) { last = performance.now(); tickTimer = setInterval(tick, ms); }
+  if (run) { last = performance.now(); tickTimer = setInterval(tick, 33); }
 }
-// Mono: the first EQ node downmixes to 1 channel ((L+R)/2), which then plays in both ears.
 function applyMono() {
   $('monoHint').textContent = state.mono ? 'On: left and right mixed, heard in both ears' : 'Off: stereo mics keep left and right separate';
-  chains().forEach(applyMonoTo);
-}
-function applyMonoTo(ch) {
-  ch.input.channelCount = 1;
-  ch.input.channelCountMode = state.mono ? 'explicit' : 'max';
-  ch.input.channelInterpretation = 'speakers';
-  if (ch.voice) {                                // mono: the voice engine runs its network once, not per channel
-    ch.voice.channelCount = state.mono ? 1 : 2;
-    ch.voice.channelCountMode = state.mono ? 'explicit' : 'max';
-    ch.voice.channelInterpretation = 'speakers';
-  }
+  engine.set({ mono: state.mono });
 }
 // With Windows control the captured audio already has the Windows level applied, so the app adds no gain.
 const volFactor = () => (curSys() ? 1 : state.volume / 75);
-// ---- Compressor / auto-level ----
-// Strength 0-100% sets threshold -12..-40 dB and ratio 2:1..8:1; the compressor's built-in makeup gain
-// brings quiet speech back up. Off = the compressor is taken out of the signal path entirely.
-function compParams(a) {
-  return { threshold: -12 - 28 * a, ratio: 2 + 6 * a, knee: 10, attack: 0.005, release: 0.25 };
-}
-function applyCompTo(ch) {
-  const p = compParams(state.compAmount / 100), c = ch.comp;
-  c.threshold.value = p.threshold; c.ratio.value = p.ratio; c.knee.value = p.knee;
-  c.attack.value = p.attack; c.release.value = p.release;
-  if (ch.compOn === state.comp) return;
-  routeChain(ch);
-  ch.compOn = state.comp;
-}
-// volume -> gate -> [compressor] -> gateGain. The gate goes first: the compressor lifts noise by about 14 dB,
-// which left the gate open on noise alone (62% of the time, measured). Without the worklet, gateGain is the gate.
-function routeChain(ch) {
-  const levelGate = ch.voice && state.gateAuto ? null : ch.gate;    // on Auto, the voice engine does the gating
-  const path = [ch.volGain, levelGate, state.comp && ch.comp, ch.gateGain].filter(Boolean);
-  for (const node of [ch.volGain, ch.gate, ch.comp]) if (node) { try { node.disconnect(); } catch {} }
-  path.reduce((a, b) => (a.connect(b), b));
-}
+function updateVolumeGain() { engine.set({ inputGain: volFactor() }); }
+function applyNr() { engine.set({ nr: state.nr, nrAmount: state.nrAmount }); }
 function applyComp() {
-  chains().forEach(applyCompTo);
+  engine.set({ comp: state.comp, compAmount: state.compAmount });
   updateCompHint();
 }
 function updateCompHint() {
   if (!state.comp) { $('compHint').textContent = 'Your volume goes out as-is'; return; }
-  const mc = eqNodes && meterChain();
-  const r = mc && typeof mc.comp.reduction === 'number' ? mc.comp.reduction : 0;
+  const r = engine.compReduction();
   $('compHint').textContent = r < -0.5 ? `Evening out ${(-r).toFixed(1)} dB` : 'Evens out your volume';
 }
-function updateVolumeGain() { chains().forEach(ch => rampTo(ch.volGain.gain, volFactor(), 0.02, ch.ctx)); }
-function updateMonitorGain() {     // Listen goes quiet while a mic test plays back, so you hear only the recording
-  if (eqNodes) rampTo(eqNodes.outGain.gain, state.monitor && talking() && !testPlaying ? state.monitorVol / 100 : 0, talkFade(), eqNodes.ctx);
-}
-let autoGateDb = -51;
-const gateDbNow = () => (state.gateAuto ? autoGateDb : state.gateDb);
+// Mute and push to talk silence what leaves Olive (Listen and the cable).
+function syncTalking() { engine.set({ talking: talking(), talkFade: talkFade() }); }
+const gateDbNow = () => (state.gateAuto ? engine.autoGateDb : state.gateDb);
 let shownGate = '';
 function updateGate() {
   refreshGateUi();
-  updateGateThreshold();
-  for (const ch of chains()) {
-    if (ch.voice) { ch.voice.parameters.get('gate').setValueAtTime(state.gateAuto ? 1 : 0, ch.ctx.currentTime); routeChain(ch); }
-  }
+  engine.set({ gateDb: state.gateDb, gateAuto: state.gateAuto });
 }
 function refreshGateUi() {
-  const t = Math.round(gateDbNow());
+  const t = Math.round(gateDbNow()), st = engine.status();
   $('gate').disabled = state.gateAuto;          // the slider keeps your manual setting while Auto is on
-  const byVoice = state.gateAuto && eqNodes && eqNodes.voice;
-  $('gateMark').hidden = !!byVoice;             // a voice gate has no volume threshold to mark
+  const byVoice = state.gateAuto && st.voiceGate;
+  $('gateMark').hidden = byVoice;               // a voice gate has no volume threshold to mark
   const label = byVoice ? 'Voice' : t + ' dB';   // the Auto chip beside it says whether it's automatic
   if (label !== shownGate) {
     shownGate = label;
     $('gateVal').textContent = label;
     $('gateMark').style.left = dbToPct(t) + '%';
-    $('gateHint').textContent = !byVoice && chains().some(ch => ch.gateFailed) ? 'Using the backup gate, which can clip the start of words' : byVoice ? 'Opens when it hears a voice, so fans and bumps stay out' : state.gateAuto ? 'Mutes you when you go quiet; follows your background noise' : "Mutes you when you're quieter than this";
+    $('gateHint').textContent = !byVoice && st.gateFailed ? 'Using the backup gate, which can clip the start of words' : byVoice ? 'Opens when it hears a voice, so fans and bumps stay out' : state.gateAuto ? 'Mutes you when you go quiet; follows your background noise' : "Mutes you when you're quieter than this";
   }
 }
 function updateHints() {
+  const st = engine.status();
   $('nrVal').textContent = state.nr ? state.nrAmount + '%' : 'Off';
   $('compVal').textContent = state.comp ? state.compAmount + '%' : 'Off';
   $('monVal').textContent = state.monitor ? state.monitorVol + '%' : 'Off';
   $('nrHint').textContent = !state.nr ? 'Off: nothing is removed'
-    : chains().some(ch => ch.nrFailed) ? 'Unavailable: the noise reduction engine could not start'
-    : chains().some(ch => ch.voiceFailed) ? "Using the backup noise reduction: the voice engine couldn't start"
+    : st.nrFailed ? 'Unavailable: the noise reduction engine could not start'
+    : st.voiceFailed ? "Using the backup noise reduction: the voice engine couldn't start"
     : 'Lowers fans, rumble and hiss. Turn it down to mix your natural sound back in';
   $('monHint').textContent = !state.monitor ? "You won't hear yourself"
-    : analyser ? 'Use headphones to avoid echo'
+    : engine.capturing ? 'Use headphones to avoid echo'
     : 'On · microphone not open, nothing to play';
-  if (!micTest) $('testBtn').disabled = !analyser;
+  if (!engine.micTest) $('testBtn').disabled = !engine.capturing;
 }
 
 // ---- Level meter ----
 let smoothed = MIN_DB, peak = MIN_DB, peakHold = 0;
 let last = performance.now();
 function tick() {
-  // Hidden with the audio-thread gate on every chain: nothing to do on this thread at all.
-  if (isHidden() && analyser && eqNodes.gate && (!sendNodes || sendNodes.gate)) { last = performance.now(); return; }
   const now = performance.now();
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
-  const raw = analyser ? rawAmplitude(meterChain()) : 0;
-  let db = ampToDb(raw * volFactor());                       // in-app: 75% = unity
-  let open = false;
-  if (!analyser) { /* no mic open, so nothing to measure */ }
-  else if (meterChain().gate) open = meterChain().gateIsOpen;
-  else open = gateChain(meterChain(), liveAmplitude(), now);
-  if (sendNodes && !sendNodes.gate && meterChain() !== sendNodes) gateChain(sendNodes, sendSrc ? chainAmplitude(sendNodes) : 0, now);
+  const on = engine.capturing;
+  let db = ampToDb(on ? engine.rawAmplitude() * volFactor() : 0);   // in-app: 75% = unity
+  const open = on && engine.gateOpen();
   if (state.muted) db = -Infinity;
-  if (isHidden()) { smoothed = MIN_DB; peak = MIN_DB; return; }       // hidden in the tray: audio work only, no drawing
+  if (isHidden()) { smoothed = MIN_DB; peak = MIN_DB; return; }       // hidden in the tray: no drawing
   drawGateChip(open);
 
   const target = Math.max(MIN_DB, Math.min(6, db));
@@ -276,7 +208,7 @@ function tick() {
   levelPct = dbToPct(smoothed);
   peakPct = dbToPct(peak);
   if ((compTick = (compTick + 1) % 8) === 0) {           // ~4x per second
-    if (state.comp && eqNodes) updateCompHint();
+    if (state.comp) updateCompHint();
     if (state.gateAuto) refreshGateUi();
   }
   drawMeter(now);
@@ -303,7 +235,7 @@ document.addEventListener('visibilitychange', () => syncTicker());
 let shownChip = null;
 function drawGateChip(open) {
   const closedByKey = state.ptt && !pttOpen;
-  const text = state.muted || !analyser ? '' : closedByKey ? (state.pttKey ? `Hold ${state.pttKey.label} to talk` : 'Choose a talk key') : open ? 'Gate open' : 'Gate closed';
+  const text = state.muted || !engine.capturing ? '' : closedByKey ? (state.pttKey ? `Hold ${state.pttKey.label} to talk` : 'Choose a talk key') : open ? 'Gate open' : 'Gate closed';
   if (text === shownChip) return;
   shownChip = text;
   const chip = $('gateChip');
@@ -324,12 +256,9 @@ function drawMeter(now) {
 }
 let sendShown = MIN_DB, shownSendDb = '', shownSendCover = '';
 function drawSendLevel() {
-  if (!sendNodes || !state.send) return;
-  const b = sendNodes.meterBuf;
-  sendNodes.outMeter.getFloatTimeDomainData(b);
-  let sum = 0;
-  for (let i = 0; i < b.length; i++) sum += b[i] * b[i];
-  const db = Math.max(MIN_DB, ampToDb(Math.sqrt(sum / b.length) * 1.41));
+  const amp = state.send ? engine.sendAmplitude() : null;
+  if (amp === null) return;
+  const db = Math.max(MIN_DB, ampToDb(amp));
   sendShown = db > sendShown ? db : Math.max(db, sendShown - 8);
   const cover = 'scaleX(' + (1 - dbToPct(sendShown) / 100).toFixed(3) + ')';
   if (cover !== shownSendCover) { $('sendCover').style.transform = cover; shownSendCover = cover; }
@@ -337,9 +266,6 @@ function drawSendLevel() {
   if (text !== shownSendDb) { $('sendDb').textContent = text; shownSendDb = text; }
 }
 
-let stream = null, srcNode = null, audioCtx = null, analyser = null, captureToken = 0;
-let eqNodes = null;                 // main chain (meter + Listen) on audioCtx
-let sendCtx = null, sendNodes = null, sendSrc = null, sendCableId = null;   // send chain -> virtual cable
 
 // ---- Mic EQ ----
 // Six bands plus a low cut. Every band has a frequency, a gain and (peaking bands) a width (Q).
@@ -410,71 +336,10 @@ function switchEqTo(name) {
   if (eqByMic[name]) { restoreEq(eqByMic[name]); showEqPreset(); syncEqUi(); }
 }
 
-function audioCtxInit() {
-  try {
-    audioCtx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
-    eqNodes = buildChain(audioCtx);       // its analyser (~21 ms per reading) also drives the level meter
-    // After setSinkId, 30 s of pure silence slows this context's clock to about 72%. A signal far too quiet to hear (-140 dB) keeps it at full speed.
-    const keepClock = audioCtx.createConstantSource();
-    keepClock.offset.value = 1e-7;
-    keepClock.connect(audioCtx.destination);
-    keepClock.start();
-  } catch (err) { audioCtx = null; eqNodes = null; console.error('Audio engine unavailable:', err); }
-}
-// One processing chain: noise reduction -> [mono] EQ -> volume -> gate -> output level -> this context's output device.
-function buildChain(ctx) {
-  const hp = ctx.createBiquadFilter(); hp.type = 'lowshelf'; hp.frequency.value = 80; hp.gain.value = 0; hp.Q.value = 0.7;
-  const bands = EQ_BANDS.map(b => { const f = ctx.createBiquadFilter(); f.type = b.type; f.frequency.value = b.freq; f.Q.value = b.q; return f; });
-  [hp, ...bands].reduce((a, b) => (a.connect(b), b));
-  const head = ctx.createGain();                // the mic connects here; noise reduction is inserted after it
-  const rawMeter = ctx.createAnalyser();        // the mic before any processing: what the Input level meter shows
-  rawMeter.fftSize = 1024;
-  head.connect(rawMeter);
-  head.connect(hp);
-  const output = bands[bands.length - 1];
-  const volGain = ctx.createGain(), gateGain = ctx.createGain(), outGain = ctx.createGain();
-  volGain.gain.value = volFactor();
-  gateGain.gain.value = 0;                      // opens on the first loud reading of this chain's own audio
-  outGain.gain.value = 0;
-  outGain.channelCount = 2; outGain.channelCountMode = 'explicit';  // always stereo out: mono plays in both ears
-  outGain.channelInterpretation = 'speakers';
-  const comp = ctx.createDynamicsCompressor();
-  output.connect(volGain); gateGain.connect(outGain); outGain.connect(ctx.destination);
-  // Each chain measures its own audio for the noise gate: the send engine hears the mic a little later
-  // than the main one, so a gate driven by the other engine's audio would clip the starts/ends of words.
-  const meter = ctx.createAnalyser();
-  meter.fftSize = 1024;
-  output.connect(meter);
-  const outMeter = ctx.createAnalyser();        // what actually leaves this chain, after gate, compressor and mute
-  outMeter.fftSize = 1024;
-  outGain.connect(outMeter);
-  const ch = { ctx, head, rawMeter, hp, bands, input: hp, output, volGain, comp, compOn: null, gateGain, outGain,
-               meter, meterBuf: new Float32Array(meter.fftSize), outMeter, gateIsOpen: false, holdUntil: 0 };
-  applyCompTo(ch);
-  applyMonoTo(ch);
-  applyEqTo(ch);
-  attachGate(ch);
-  attachVoice(ch);
-  return ch;
-}
 function applyEq() {
   $('eqToggle').closest('.eq').classList.toggle('off', !eq.on);
-  chains().forEach(ch => applyEqTo(ch));
+  engine.set({ eq });
   scheduleEqDraw();
-}
-function applyEqTo(ch) {
-  const on = eq.on && !(eqBypass && ch === eqNodes);    // comparing only changes what you hear, not what's sent
-  EQ_BANDS.forEach((d, i) => {
-    const s = eq.b[d.key], f = ch.bands[i];
-    rampTo(f.frequency, s.f, 0.012, ch.ctx);            // short glide: no clicks while dragging
-    rampTo(f.gain, on ? s.g : 0, 0.012, ch.ctx);
-    rampTo(f.Q, s.q, 0.012, ch.ctx);
-  });
-  // Low cut on: 80 Hz high-pass. Off: a 0 dB shelf, which passes audio unchanged.
-  const cut = on && eq.lowCut;
-  ch.hp.type = cut ? 'highpass' : 'lowshelf';
-  ch.hp.frequency.value = 80;
-  ch.hp.gain.value = 0;
 }
 function eqEdited() {
   $('eqPreset').value = 'custom';
@@ -735,7 +600,7 @@ function bindEq() {
     eqBypass = on;
     compare.classList.toggle('holding', on);
     compare.textContent = on ? 'Hearing without EQ' : 'Hold to compare';
-    if (eqNodes) applyEqTo(eqNodes);
+    engine.set({ eqBypass: on });
   };
   compare.addEventListener('pointerdown', e => { if (e.button === 0 && !compare.disabled) { compare.setPointerCapture(e.pointerId); holdCompare(true); } });
   for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur']) compare.addEventListener(ev, () => holdCompare(false));
@@ -748,204 +613,12 @@ function bindEq() {
   syncEqUi();
 }
 
-// ---- Live input (Web Audio) ----
-function liveAmplitude() { return chainAmplitude(meterChain()); }
-function rawAmplitude(ch) { return chainAmplitude(ch, ch.rawMeter); }
-function chainAmplitude(ch, meter = ch.meter) {
-  const b = ch.meterBuf;
-  meter.getFloatTimeDomainData(b);
-  let sum = 0;
-  for (let i = 0; i < b.length; i++) sum += b[i] * b[i];
-  return Math.sqrt(sum / b.length) * 1.41;                   // RMS -> roughly peak-scaled
-}
-// ---- Noise gate ----
-// Preferred: gate-worklet.js on the audio thread (sample-accurate, 5 ms look-ahead, 150 ms hold).
-// Fallback if it can't load: gate from the main thread below (reacts every 20 ms, can clip word starts).
-const GATE_WORKLET_URL = 'app://local/gate-worklet.js', NR_WORKLET_URL = 'app://local/nr-worklet.js', VOICE_WORKLET_URL = 'app://local/voice-worklet.js';
-const RNNOISE_WASM_URL = 'app://local/rnnoise.wasm';
-const gateModules = new WeakMap(), nrModules = new WeakMap();
-function loadGateModule(ctx) {
-  if (!gateModules.has(ctx)) gateModules.set(ctx, ctx.audioWorklet.addModule(GATE_WORKLET_URL));
-  return gateModules.get(ctx);
-}
-async function attachGate(ch) {
-  try {
-    if (!ch.ctx.audioWorklet) throw new Error('AudioWorklet not supported');
-    await loadGateModule(ch.ctx);
-    if (ch.ctx.state === 'closed') return;
-    const node = new AudioWorkletNode(ch.ctx, 'noise-gate', { numberOfInputs: 1, numberOfOutputs: 1, parameterData: { threshold: state.gateDb, auto: state.gateAuto ? 1 : 0 } });
-    node.port.onmessage = e => {
-      const d = e.data || {};
-      if (ch.voice && state.gateAuto) return;       // the voice engine reports open/closed instead
-      ch.gateIsOpen = !!d.open;
-      if (ch === meterChain() && typeof d.threshold === 'number') autoGateDb = d.threshold;   // learned on the running chain
-    };
-    node.onprocessorerror = () => detachGate(ch);
-    ch.gate = node;
-    routeChain(ch);
-    rampTo(ch.gateGain.gain, 1, 0.003, ch.ctx);  // gateGain is no longer the gate
-    syncTicker();
-  } catch (err) {
-    console.warn('Audio-thread noise gate unavailable, using the fallback:', err && err.message);
-    ch.gateFailed = true;
-    shownGate = ''; refreshGateUi();
-  }
-}
-function detachGate(ch) {                         // worklet crashed: fall back to the main-thread gate
-  const node = ch.gate; if (!node) return;
-  ch.gate = null;
-  ch.gateFailed = true;
-  shownGate = ''; refreshGateUi();
-  syncTicker();
-  try { node.disconnect(); } catch {}
-  routeChain(ch);
-  ch.gateIsOpen = !ch.gateIsOpen; gateChain(ch, 0, performance.now());
-}
-// ---- Voice cleanup ----
-// voice-worklet.js: RNNoise plus a gate that opens on detected voice. If it can't run, nr-worklet.js and the volume gate remain.
-// The network (vendor/rnnoise.wasm) is compiled once here and handed to each worklet, which can't fetch files itself.
-let rnnoiseWasm = null;
-function loadRnnoise() {
-  if (!rnnoiseWasm) {
-    rnnoiseWasm = fetch(RNNOISE_WASM_URL)
-      .then(r => { if (!r.ok) throw new Error('rnnoise.wasm: ' + r.status); return r.arrayBuffer(); })
-      .then(bytes => WebAssembly.compile(bytes));
-    rnnoiseWasm.catch(() => { rnnoiseWasm = null; });    // try again next time instead of keeping the failure
-  }
-  return rnnoiseWasm;
-}
-async function attachVoice(ch) {
-  try {
-    if (ch.ctx.sampleRate !== 48000) throw new Error('needs 48 kHz, got ' + ch.ctx.sampleRate);
-    const [wasm] = await Promise.all([loadRnnoise(), ch.ctx.audioWorklet.addModule(VOICE_WORKLET_URL)]);
-    if (ch.ctx.state === 'closed') return;
-    const node = new AudioWorkletNode(ch.ctx, 'voice-cleanup', { numberOfInputs: 1, numberOfOutputs: 1, processorOptions: { wasm }, parameterData: { strength: nrStrengthNow(), gate: state.gateAuto ? 1 : 0 } });
-    node.port.onmessage = e => { if (state.gateAuto && typeof (e.data || {}).open === 'boolean') ch.gateIsOpen = e.data.open; };
-    node.onprocessorerror = () => { console.warn('Voice cleanup crashed; using the older noise reduction'); detachNr(ch); ch.voice = null; ch.voiceFailed = true; routeChain(ch); attachNr(ch); shownGate = ''; refreshGateUi(); updateHints(); };
-    ch.nr = node; ch.voice = node;
-    applyMonoTo(ch);
-    connectHead(ch, node);
-    node.connect(ch.hp);
-    routeChain(ch);
-    shownGate = ''; refreshGateUi();
-  } catch (err) {
-    console.warn('Voice cleanup unavailable, using the older noise reduction:', err && err.message);
-    ch.voiceFailed = true;
-    attachNr(ch);
-    shownGate = ''; refreshGateUi(); updateHints();
-  }
-}
-
-// ---- Fallback noise reduction ----
-// nr-worklet.js on the raw mic, if the voice engine can't run. Strength never rebuilds anything, so moving the slider doesn't interrupt the audio.
-async function attachNr(ch) {
-  try {
-    if (!ch.ctx.audioWorklet) throw new Error('AudioWorklet not supported');
-    if (!nrModules.has(ch.ctx)) nrModules.set(ch.ctx, ch.ctx.audioWorklet.addModule(NR_WORKLET_URL));
-    await nrModules.get(ch.ctx);
-    if (ch.ctx.state === 'closed') return;
-    const node = new AudioWorkletNode(ch.ctx, 'noise-reduction', { numberOfInputs: 1, numberOfOutputs: 1, parameterData: { strength: nrStrengthNow() } });
-    node.onprocessorerror = () => { detachNr(ch); ch.nrFailed = true; updateHints(); };
-    ch.nr = node;
-    connectHead(ch, node);
-    node.connect(ch.hp);
-  } catch (err) {
-    ch.nrFailed = true;
-    updateHints();
-    console.warn('Noise reduction unavailable:', err && err.message);
-  }
-}
-function detachNr(ch) {
-  const node = ch.nr; if (!node) return;
-  ch.nr = null;
-  try { node.disconnect(); } catch {}
-  connectHead(ch, ch.hp);
-}
-function connectHead(ch, next) {
-  ch.head.disconnect();
-  ch.head.connect(ch.rawMeter);
-  ch.head.connect(next);
-}
-const nrStrengthNow = () => (state.nr ? state.nrAmount : 0);
-function applyNr() {
-  for (const ch of chains()) if (ch.nr) ch.nr.parameters.get('strength').setValueAtTime(nrStrengthNow(), ch.ctx.currentTime);
-}
-
-function updateGateThreshold() {
-  for (const ch of chains()) if (ch.gate) {
-    ch.gate.parameters.get('threshold').setValueAtTime(state.gateDb, ch.ctx.currentTime);
-    ch.gate.parameters.get('auto').setValueAtTime(state.gateAuto ? 1 : 0, ch.ctx.currentTime);
-  }
-}
-
-// Fallback automatic threshold (same rule as the worklet): noise floor = the lowest 100 ms peak of the last 6 s,
-// threshold = floor + 9 dB, kept between -70 and -25 dBFS.
-const floorMins = new Array(60).fill(-60);
-let floorSlotPeak = -Infinity, floorSlotT = 0, floorIdx = 0;
-function trackFloor(amp, dt) {
-  const d = ampToDb(amp);
-  const lvl = isFinite(d) ? d : -120;
-  if (lvl > floorSlotPeak) floorSlotPeak = lvl;
-  floorSlotT += dt;
-  if (floorSlotT >= 0.1) {
-    floorMins[floorIdx] = floorSlotPeak; floorIdx = (floorIdx + 1) % floorMins.length;
-    floorSlotPeak = -Infinity; floorSlotT = 0;
-    const floor = Math.min(-35, Math.max(-90, Math.min(...floorMins)));
-    autoGateDb = Math.min(-25, Math.max(-70, floor + 9));
-  }
-}
-
-// Fallback noise gate for one chain, from that chain's own audio. Opens at once; stays open 150 ms after you
-// go quiet (hold) so word endings aren't cut, then fades out.
-const GATE_HOLD_MS = 150;
-function gateChain(ch, amp, now) {
-  if (ch === meterChain()) trackFloor(amp * volFactor(), 0.02);
-  const loud = ampToDb(amp * volFactor()) >= gateDbNow();
-  if (loud) ch.holdUntil = now + GATE_HOLD_MS;
-  const open = loud || now < ch.holdUntil;
-  if (open !== ch.gateIsOpen) {
-    ch.gateIsOpen = open;
-    rampTo(ch.gateGain.gain, open ? 1 : 0, open ? 0.003 : 0.05, ch.ctx);
-  }
-  return open;
-}
-
-function stopCapture() {
-  if (stream) stream.getTracks().forEach(tr => tr.stop());
-  if (srcNode) { try { srcNode.disconnect(); } catch {} }
-  if (sendSrc) { try { sendSrc.disconnect(); } catch {} }
-  stream = null; srcNode = null; sendSrc = null; analyser = null; srcLinked = false;
-  updateHints();
-}
-
+// ---- Live input ----
+function stopCapture() { engine.stopCapture(); }
 async function startCapture() {
-  const token = ++captureToken;
-  stopCapture();
-  capturedId = null;
-  try {
-    const s = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        deviceId: { exact: state.deviceId },
-        noiseSuppression: false, echoCancellation: false, autoGainControl: false   // raw mic: the app does its own noise reduction
-      }
-    });
-    if (token !== captureToken) { s.getTracks().forEach(tr => tr.stop()); return; }
-    stream = s;
-    capturedId = state.deviceId;
-    if (!audioCtx || !eqNodes) throw Object.assign(new Error('No audio engine'), { name: 'AudioEngineError' });
-    if (mainNeeded() && audioCtx.state === 'suspended') await audioCtx.resume();
-    srcNode = audioCtx.createMediaStreamSource(stream);
-    srcLinked = false;
-    analyser = eqNodes.meter;                                // marks live capture as active
-    connectSendSource();
-    syncChains();
-    setStatus('');
-    updateHints();
-  } catch (err) {
-    if (token !== captureToken) return;
-    setStatus(micError(err));
-    updateHints();
-  }
+  try { if (await engine.capture(state.deviceId)) setStatus(''); }
+  catch (err) { setStatus(micError(err)); }
+  updateHints();
 }
 
 function setStatus(msg) { $('devStatus').textContent = msg; }
@@ -959,8 +632,7 @@ function micError(err) {
   if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') return "This microphone isn't connected any more.";
   return `Couldn't open this microphone (${err.name}).`;
 }
-let capturedId = null;
-const captureIsCurrent = () => stream && capturedId === state.deviceId && stream.getAudioTracks().every(tr => tr.readyState === 'live');
+const captureIsCurrent = () => engine.isCapturing(state.deviceId);
 
 async function loadDevices() {
   setStatus('');
@@ -1008,7 +680,7 @@ async function loadDevices() {
 let startupRetries = 0, startupRetryTimer = null;
 function retryWhileAudioStartsUp() {
   clearTimeout(startupRetryTimer);
-  if (live && (!sendWanted || sendNodes)) { startupRetries = 0; return; }
+  if (live && (!sendWanted || engine.hasSend)) { startupRetries = 0; return; }
   if (startupRetries >= 12) {
     if (!live) setStatus('Still no microphone after a minute, so Olive stopped looking. Plug one in, or press refresh to try again.');
     return;
@@ -1031,39 +703,24 @@ function sendHint(text, cls) {
 }
 // What other apps get right now, in words. The level bar only shows while the cable is connected.
 function updateSendStatus() {
-  const connected = !!sendNodes && state.send && live;
+  const connected = engine.hasSend && state.send && live;
   $('sendLevel').hidden = !connected;
   if (!connected) return;
   if (state.muted) sendHint('Muted: nothing is being sent', 'on');
   else if (state.ptt && !pttOpen) sendHint(state.pttKey ? `Push to talk: hold ${state.pttKey.label} to send` : 'Push to talk: choose a key below', 'on');
   else sendHint('Sending. In Discord, choose "CABLE Output" as your input', 'on');
 }
-function updateSendGain() {
-  if (sendNodes) rampTo(sendNodes.outGain.gain, state.send && talking() ? 1 : 0, talkFade(), sendCtx);
-}
-// The send chain reads the mic directly (its own source node) so nothing sits between it and the cable.
-function connectSendSource() {
-  if (sendSrc) { try { sendSrc.disconnect(); } catch {} sendSrc = null; }
-  if (!sendNodes || !stream) return;
-  sendSrc = sendCtx.createMediaStreamSource(stream);
-  sendSrc.connect(sendNodes.head);
-}
-function teardownSend() {
-  if (sendSrc) { try { sendSrc.disconnect(); } catch {} }
-  if (sendCtx) sendCtx.close().catch(() => {});
-  sendCtx = null; sendNodes = null; sendSrc = null; sendCableId = null;
-  syncChains();
-}
 async function findCable() {
   const all = await navigator.mediaDevices.enumerateDevices();
   const outs = all.filter(d => d.kind === 'audiooutput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
   return outs.find(d => /CABLE Input/i.test(d.label)) || outs.find(d => isCableLabel(d.label)) || null;
 }
+function stopSending() { state.send = false; engine.set({ send: false }); engine.closeSend(); $('sendToggle').checked = false; }
 async function setSend(on) {
   const token = ++sendToken;
   if (!on) {
-    state.send = false; updateSendGain(); teardownSend();
-    $('sendToggle').checked = false; sendHint('Off: other apps hear your raw mic');
+    stopSending();
+    sendHint('Off: other apps hear your raw mic');
     updateSendStatus();
     return;
   }
@@ -1072,33 +729,22 @@ async function setSend(on) {
     const cable = await findCable();
     if (token !== sendToken) return;
     if (!cable) {
-      state.send = false; teardownSend();
-      $('sendToggle').checked = false;
+      stopSending();
       sendHint('VB-Audio Virtual Cable not found. Install it from vb-audio.com/Cable, restart the PC, then try again.', 'warn');
       updateSendStatus();
       return;
     }
-    if (!(sendNodes && sendCableId === cable.deviceId && sendCtx.state !== 'closed')) {
+    if (!engine.sendingTo(cable.deviceId)) {
       sendHint('Connecting…');
-      state.send = false; teardownSend();
-      const ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
-      try {
-        await ctx.setSinkId(cable.deviceId);
-        if (ctx.state === 'suspended') await ctx.resume();
-      } catch (err) { ctx.close().catch(() => {}); throw err; }
-      if (token !== sendToken) { ctx.close().catch(() => {}); return; }
-      sendCtx = ctx; sendCableId = cable.deviceId;
-      sendNodes = buildChain(ctx);
-      connectSendSource();
-      syncChains();
+      state.send = false; engine.set({ send: false });
+      if (!(await engine.openSend(cable.deviceId)) || token !== sendToken) return;
     }
     state.send = true;
-    updateSendGain();
+    engine.set({ send: true });
     if (live) updateSendStatus(); else sendHint('On · but there is no microphone to send', 'warn');
   } catch (err) {
     if (token !== sendToken) return;
-    state.send = false; teardownSend();
-    $('sendToggle').checked = false;
+    stopSending();
     sendHint("Couldn't send to the virtual cable (" + (err.name || 'Error') + ': ' + err.message + ')', 'warn');
     updateSendStatus();
   }
@@ -1422,8 +1068,7 @@ const talking = () => !state.muted && (!state.ptt || pttOpen);
 const talkFade = () => (state.ptt && pttOpen ? 0.005 : 0.02);
 function setPttOpen(open) {
   pttOpen = open;
-  updateMonitorGain();
-  updateSendGain();
+  syncTalking();
   updateSendStatus();
 }
 function onPttKey(down) {
@@ -1512,7 +1157,7 @@ let appliedOutput = 'default';
 async function setOutput(id) {
   if (id === appliedOutput) return;
   const sink = id === 'default' ? '' : id;
-  await Promise.all([audioCtx ? audioCtx.setSinkId(sink) : null, muteSound.setSinkId(sink), unmuteSound.setSinkId(sink)]);
+  await Promise.all([engine.setOutput(sink), muteSound.setSinkId(sink), unmuteSound.setSinkId(sink)]);
   appliedOutput = id;
 }
 async function loadOutputs() {
@@ -1561,12 +1206,7 @@ function bindSetup() {
   $('setupOpen').addEventListener('click', () => { state.setupDone = false; freshInstall = true; updateSetup(); });
 }
 
-// ---- Mic test: record 5 s of what Olive sends, then play it back to you ----
-// Recorded after noise reduction, EQ, volume, gate and compressor, and before mute and push to talk: what Discord gets
-// while you talk. So it works while muted, with nobody else hearing it. It plays back only on your own output.
-const TEST_SECONDS = 5, RECORDER_URL = 'app://local/recorder-worklet.js';
-const recorderModules = new WeakMap();
-let micTest = null, testPlaying = false;
+// ---- Mic test: record 5 s of what Olive sends, then play it back to you (the engine does the audio) ----
 function showTest(label, phase, hint) {
   const b = $('testBtn');
   b.textContent = label;
@@ -1574,85 +1214,28 @@ function showTest(label, phase, hint) {
   b.classList.toggle('playing', phase === 'playing');
   if (hint !== undefined) $('testHint').textContent = hint;
 }
-async function startMicTest() {
-  const ch = analyser && meterChain();
-  if (!ch || micTest) return;
-  const t = micTest = { ch, chunks: [], phase: 'starting' };
-  try {
-    if (!recorderModules.has(ch.ctx)) recorderModules.set(ch.ctx, ch.ctx.audioWorklet.addModule(RECORDER_URL));
-    await recorderModules.get(ch.ctx);
-    t.rec = new AudioWorkletNode(ch.ctx, 'mic-recorder', { numberOfInputs: 1, numberOfOutputs: 0 });
-  } catch (err) {
-    endMicTest(t, "The mic test couldn't start: " + cleanErr(err));
-    return;
+const testHeard = e => (e.silent ? 'Nothing got through: the noise gate stayed shut. Talk louder, or turn the gate down'
+  : e.toCable ? 'Playing back what Discord hears'
+  : "Playing back Olive's sound. Send to Discord is off, so Discord hears your raw mic");
+function onMicTest(e) {
+  if (e.phase === 'recording') {
+    showTest(`Recording · ${e.secondsLeft}`, 'recording', !e.first ? undefined : state.muted ? "Recording. You're muted, so nobody else hears this" : 'Recording. Talk the way you normally do');
+  } else if (e.phase === 'playing') {
+    showTest('Stop', 'playing', testHeard(e));
+  } else {
+    const hint = e.reason === 'error' ? "The mic test couldn't start: " + cleanErr(e.error)
+      : e.reason === 'short' ? 'That was too short to play back. Try again'
+      : e.reason === 'silent' ? testHeard(e) : '';
+    showTest('Test mic', null, hint);
+    $('testBtn').disabled = !engine.capturing;
   }
-  if (micTest !== t) return;
-  t.done = new Promise(resolve => { t.rec.port.onmessage = e => { if (e.data === 'done') resolve(); else t.chunks.push(e.data); }; });
-  ch.gateGain.connect(t.rec);
-  t.phase = 'recording';
-  const ends = performance.now() + TEST_SECONDS * 1000;
-  const count = () => {
-    if (t.phase !== 'recording') return;
-    const left = ends - performance.now();
-    if (left <= 0) { stopRecording(t); return; }
-    showTest(`Recording · ${Math.ceil(left / 1000)}`, 'recording');
-    t.timer = setTimeout(count, left % 1000 || 1000);
-  };
-  showTest(`Recording · ${TEST_SECONDS}`, 'recording', state.muted ? "Recording. You're muted, so nobody else hears this" : 'Recording. Talk the way you normally do');
-  count();
-}
-async function stopRecording(t) {
-  if (t.phase !== 'recording') return;
-  t.phase = 'stopping';
-  clearTimeout(t.timer);
-  t.rec.port.postMessage('stop');
-  await Promise.race([t.done, new Promise(r => setTimeout(r, 1000))]);   // a chain that was switched off sends nothing more
-  try { t.ch.gateGain.disconnect(t.rec); } catch {}
-  if (micTest !== t) return;
-  const rate = t.ch.ctx.sampleRate, frames = t.chunks.reduce((n, c) => n + c[0].length, 0);
-  if (frames < rate * 0.3 || !audioCtx) { endMicTest(t, 'That was too short to play back. Try again'); return; }
-  const channels = Math.max(...t.chunks.map(c => c.length)), buf = audioCtx.createBuffer(channels, frames, rate);
-  let at = 0, peak = 0;
-  for (const c of t.chunks) {
-    for (let k = 0; k < channels; k++) buf.getChannelData(k).set(c[Math.min(k, c.length - 1)], at);
-    for (const v of c[0]) { const a = Math.abs(v); if (a > peak) peak = a; }
-    at += c[0].length;
-  }
-  t.chunks = null;
-  t.seconds = frames / rate; t.peakDb = ampToDb(peak);
-  const silent = t.peakDb < -50;
-  const heard = silent ? 'Nothing got through: the noise gate stayed shut. Talk louder, or turn the gate down'
-    : sendNodes && state.send ? 'Playing back what Discord hears'
-    : "Playing back Olive's sound. Send to Discord is off, so Discord hears your raw mic";
-  t.phase = 'playing';
-  testPlaying = true;
-  updateMonitorGain();
-  try { if (audioCtx.state !== 'running') await audioCtx.resume(); } catch { /* plays when it can */ }
-  if (micTest !== t) return;
-  const src = t.src = audioCtx.createBufferSource();
-  src.buffer = buf;
-  src.connect(audioCtx.destination);           // your output only: the cable is on a different context
-  src.onended = () => endMicTest(t, silent ? heard : '');
-  src.start();
-  showTest('Stop', 'playing', heard);
-}
-function endMicTest(t, hint) {
-  if (micTest !== t) return;
-  micTest = null;
-  clearTimeout(t.timer);
-  if (t.rec) { try { t.ch.gateGain.disconnect(t.rec); } catch {} t.rec.port.postMessage('stop'); }
-  if (t.src) { t.src.onended = null; try { t.src.stop(); } catch {} try { t.src.disconnect(); } catch {} }
-  testPlaying = false;
-  updateMonitorGain();
-  syncChains();
-  showTest('Test mic', null, hint);
-  $('testBtn').disabled = !analyser;
 }
 function bindMicTest() {
   $('testBtn').addEventListener('click', () => {
-    if (!micTest) startMicTest();
-    else if (micTest.phase === 'recording') stopRecording(micTest);
-    else if (micTest.phase === 'playing') endMicTest(micTest, '');
+    const t = engine.micTest;
+    if (!t) engine.startMicTest(onMicTest);
+    else if (t.phase === 'recording') engine.finishRecording();
+    else if (t.phase === 'playing') engine.endMicTest();
   });
 }
 
@@ -1793,7 +1376,13 @@ freshInstall = !savedPrefs;
 showPrefsInUi();
 renderDevices();
 $('micSelect').addEventListener('change', e => selectDevice(e.target.value));
-audioCtxInit();
+engine.onChange(() => { shownGate = ''; refreshGateUi(); updateHints(); });
+engine.set({
+  inputGain: volFactor(), gateDb: state.gateDb, gateAuto: state.gateAuto, nr: state.nr, nrAmount: state.nrAmount, mono: state.mono,
+  comp: state.comp, compAmount: state.compAmount, eq, monitor: state.monitor, monitorVol: state.monitorVol,
+  talking: talking(), talkFade: talkFade(), send: state.send
+});
+engine.init(EQ_BANDS);
 applyMono();
 bindControls(); bindEq(); updateGate(); updateHints(); updateCompHint(); paintRanges();
 setEqOpen(state.eqOpen);

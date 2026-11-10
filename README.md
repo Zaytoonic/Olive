@@ -69,7 +69,8 @@ src/main/        Electron main process
   win-audio.cs     Windows Core Audio helper: list mics, set volume and mute, report the ASUS mic key
   win-audio.ps1    runs that helper through PowerShell if win-audio.exe is missing
 src/renderer/    the window
-  index.html, styles.css, renderer.js
+  index.html, styles.css, renderer.js   the window: controls, meters, settings
+  audio-engine.js  the audio chain: mic capture, noise reduction, EQ, gate, compressor, Listen and the cable. It never touches the page, so a new window can drive it the same way
   badge.html, badge.css  the Muted badge
   voice-worklet.js noise reduction (RNNoise) and the voice gate
   gate-worklet.js  volume gate, for a gate set by hand or as the fallback

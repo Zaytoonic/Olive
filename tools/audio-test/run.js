@@ -236,21 +236,21 @@ async function evalIn(match, expression) {
 // ---- Runs inside the page ----
 const pageReady = async () => {
   for (let i = 0; i < 100; i++) {
-    try { if (stream && eqNodes && eqNodes.voice && eqNodes.gate) return true; } catch { /* page script still loading */ }
+    try { if (engine.stream && engine.mainChain && engine.mainChain.voice && engine.mainChain.gate) return true; } catch { /* page script still loading */ }
     await new Promise(r => setTimeout(r, 200));
   }
-  try { return JSON.stringify({ stream: !!stream, nr: !!(eqNodes && eqNodes.nr), gate: !!(eqNodes && eqNodes.gate), nrFailed: !!(eqNodes && eqNodes.nrFailed) }); } catch (err) { return err.message; }
+  try { return JSON.stringify({ stream: !!engine.stream, nr: !!(engine.mainChain && engine.mainChain.nr), gate: !!(engine.mainChain && engine.mainChain.gate), nrFailed: !!(engine.mainChain && engine.mainChain.nrFailed) }); } catch (err) { return err.message; }
 };
 const pageInfo = () => {
-  const s = stream.getAudioTracks()[0].getSettings();
-  return { suppression: s.noiseSuppression, sendConnected: !!sendNodes, comp: state.comp, nr: state.nr, amount: state.nrAmount, auto: state.gateAuto, engine: !!eqNodes.voice };
+  const s = engine.stream.getAudioTracks()[0].getSettings();
+  return { suppression: s.noiseSuppression, sendConnected: !!engine.sendChain, comp: state.comp, nr: state.nr, amount: state.nrAmount, auto: state.gateAuto, engine: !!engine.mainChain.voice };
 };
 const pageNrLevels = async strength => {
   state.nr = strength > 0; state.nrAmount = strength; applyNr();
-  if (eqNodes.voice) eqNodes.voice.parameters.get('gate').setValueAtTime(0, audioCtx.currentTime);   // measure the noise part alone
+  if (engine.mainChain.voice) engine.mainChain.voice.parameters.get('gate').setValueAtTime(0, engine.audioCtx.currentTime);   // measure the noise part alone
   await new Promise(r => setTimeout(r, 6000));         // the noise estimate has a ~4 s memory
-  const a = audioCtx.createAnalyser(), b = audioCtx.createAnalyser(); a.fftSize = b.fftSize = 2048;
-  srcNode.connect(a); eqNodes.nr.connect(b);
+  const a = engine.audioCtx.createAnalyser(), b = engine.audioCtx.createAnalyser(); a.fftSize = b.fftSize = 2048;
+  engine.source.connect(a); engine.mainChain.nr.connect(b);
   const ba = new Float32Array(2048), bb = new Float32Array(2048), la = [], lb = [];
   const rms = x => { let e = 0; for (const v of x) e += v * v; return 20 * Math.log10(Math.sqrt(e / x.length) + 1e-9); };
   const t0 = performance.now();
@@ -259,17 +259,17 @@ const pageNrLevels = async strength => {
     la.push(rms(ba)); lb.push(rms(bb));
     await new Promise(r => setTimeout(r, 40));
   }
-  srcNode.disconnect(a); eqNodes.nr.disconnect(b);
-  if (eqNodes.voice) eqNodes.voice.parameters.get('gate').setValueAtTime(state.gateAuto ? 1 : 0, audioCtx.currentTime);
+  engine.source.disconnect(a); engine.mainChain.nr.disconnect(b);
+  if (engine.mainChain.voice) engine.mainChain.voice.parameters.get('gate').setValueAtTime(state.gateAuto ? 1 : 0, engine.audioCtx.currentTime);
   const p10 = l => [...l].sort((x, y) => x - y)[Math.floor(l.length * 0.1)];
   return { raw: p10(la), out: p10(lb) };
 };
 // Three synchronized tracks: mic, after noise reduction, and the end of the chain (before the output level).
 const pageCapture = async secs => {
-  const ctx = audioCtx, merge = ctx.createChannelMerger(3), stages = [srcNode, eqNodes.nr, eqNodes.gateGain];
+  const ctx = engine.audioCtx, merge = ctx.createChannelMerger(3), stages = [engine.source, engine.mainChain.nr, engine.mainChain.gateGain];
   const taps = stages.map((node, i) => { const g = ctx.createGain(); g.channelCount = 1; g.channelCountMode = 'explicit'; node.connect(g); g.connect(merge, 0, i); return g; });
   const sp = ctx.createScriptProcessor(4096, 3, 1), blocks = [], thresholds = [];
-  sp.onaudioprocess = e => { blocks.push([0, 1, 2].map(c => e.inputBuffer.getChannelData(c).slice())); thresholds.push(autoGateDb); };
+  sp.onaudioprocess = e => { blocks.push([0, 1, 2].map(c => e.inputBuffer.getChannelData(c).slice())); thresholds.push(engine.autoGateDb); };
   merge.connect(sp); sp.connect(ctx.destination);
   await new Promise(r => setTimeout(r, secs * 1000));
   sp.disconnect(); merge.disconnect();
@@ -282,15 +282,15 @@ const pageCapture = async secs => {
 };
 // Loudest sample leaving the chain over some seconds, read after the output level (Listen on; the copy is muted).
 const pageOutPeak = async secs => {
-  const a = audioCtx.createAnalyser(), b = new Float32Array(2048); a.fftSize = 2048;
-  eqNodes.outGain.connect(a);
+  const a = engine.audioCtx.createAnalyser(), b = new Float32Array(2048); a.fftSize = 2048;
+  engine.mainChain.outGain.connect(a);
   let pk = 0; const t0 = performance.now();
   while (performance.now() - t0 < secs * 1000) {
     a.getFloatTimeDomainData(b);
     for (const v of b) { const m = Math.abs(v); if (m > pk) pk = m; }
     await new Promise(r => setTimeout(r, 20));
   }
-  eqNodes.outGain.disconnect(a);
+  engine.mainChain.outGain.disconnect(a);
   return 20 * Math.log10(pk + 1e-9);
 };
 // Presses Ctrl+Alt+M for real, through Windows.
@@ -410,15 +410,15 @@ async function liveChecks(profile, wav, fixture) {
         selectDevice(b.id); await wait(300); out.bBass = eq.b.bass.g;
         selectDevice(a.id); await wait(300); out.aBass = eq.b.bass.g;
         selectDevice(b.id); await wait(500);
-        const capturedBefore = stream;
+        const capturedBefore = engine.stream;
         await loadDevices(); await wait(500);
-        out.rescanKeepsCapture = stream === capturedBefore;
+        out.rescanKeepsCapture = engine.stream === capturedBefore;
         navigator.mediaDevices.enumerateDevices = async () => (await realList()).filter(d => d.deviceId !== b.id);
         await loadDevices(); await wait(800);
         out.unplugged = { current: currentDevice().name, notice: $('micNotice').textContent, bass: eq.b.bass.g, stillPreferred: prefDeviceName };
         delete navigator.mediaDevices.enumerateDevices;
         await loadDevices(); await wait(800);
-        out.replugged = { current: currentDevice().name, notice: $('micNotice').textContent, bass: eq.b.bass.g, capturing: capturedId === state.deviceId };
+        out.replugged = { current: currentDevice().name, notice: $('micNotice').textContent, bass: eq.b.bass.g, capturing: engine.capturedId === state.deviceId };
         const pickBox = $('micSelect').getBoundingClientRect(), refreshBox = $('refreshBtn').getBoundingClientRect(), optionsBefore = $('micSelect').options.length;
         out.refreshBeside = refreshBox.width > 0 && refreshBox.left >= pickBox.right - 1 && Math.abs((refreshBox.top + refreshBox.bottom) - (pickBox.top + pickBox.bottom)) / 2 < 8;
         out.panelGone = !$('devicesPanel') && !$('deviceList') && !$('devToggle');
@@ -476,7 +476,7 @@ async function liveChecks(profile, wav, fixture) {
       console.log('\nNo microphone');
       const none = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), md = navigator.mediaDevices, realList = md.enumerateDevices.bind(md), out = {};
-        const read = () => ({ options: [...$('micSelect').options].map(o => o.textContent), disabled: $('micSelect').disabled, status: $('devStatus').textContent, level: $('levelDb').textContent, chip: $('gateChip').textContent, capturing: !!stream });
+        const read = () => ({ options: [...$('micSelect').options].map(o => o.textContent), disabled: $('micSelect').disabled, status: $('devStatus').textContent, level: $('levelDb').textContent, chip: $('gateChip').textContent, capturing: !!engine.stream });
         const fail = name => { md.getUserMedia = async () => { throw new DOMException('test', name); }; };
         try {
           md.enumerateDevices = async () => (await realList()).filter(d => d.kind !== 'audioinput');
@@ -491,7 +491,7 @@ async function liveChecks(profile, wav, fixture) {
           await loadDevices(); await wait(1000);
         }
         out.back = read();
-        out.backMeter = rawAmplitude(meterChain()) > 0;
+        out.backMeter = engine.rawAmplitude(engine.meterChain()) > 0;
         return out;
       });
       check('no mic: the list says so, with no made-up mics', none.missing.options.join() === 'No microphone found' && none.missing.disabled && !none.missing.capturing, `list: ${none.missing.options.join()}, disabled: ${none.missing.disabled}`);
@@ -507,7 +507,7 @@ async function liveChecks(profile, wav, fixture) {
         const t0 = performance.now();
         while (performance.now() - t0 < 16000) {
           await wait(100);
-          if (!meterChain().gateIsOpen) { closed.push(20 * Math.log10(rawAmplitude(meterChain()) + 1e-9)); chips.add($('gateChip').textContent); }
+          if (!engine.meterChain().gateIsOpen) { closed.push(20 * Math.log10(engine.rawAmplitude(engine.meterChain()) + 1e-9)); chips.add($('gateChip').textContent); }
         }
         windowHidden = true; syncTicker();
         state.gateAuto = keep; updateGate();
@@ -531,11 +531,11 @@ async function liveChecks(profile, wav, fixture) {
         out.disabledWithoutListen = $('eqCompare').disabled;
         setMonitor(true); await wait(300);
         out.enabled = !$('eqCompare').disabled;
-        out.before = eqNodes.bands[0].gain.value;
+        out.before = engine.mainChain.bands[0].gain.value;
         $('eqCompare').dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })); await wait(300);
-        out.held = eqNodes.bands[0].gain.value; out.heldWanted = eq.b.bass.g;
+        out.held = engine.mainChain.bands[0].gain.value; out.heldWanted = eq.b.bass.g;
         $('eqCompare').dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true })); await wait(300);
-        out.after = eqNodes.bands[0].gain.value;
+        out.after = engine.mainChain.bands[0].gain.value;
         setMonitor(false);
         restoreEq(keep); showEqPreset(); syncEqUi(); eqBandsReset.length = 0;
         return out;
@@ -554,12 +554,12 @@ async function liveChecks(profile, wav, fixture) {
         const real = out.options.find(v => v !== 'default');
         if (real) {
           pick.value = real; pick.dispatchEvent(new Event('change', { bubbles: true })); await wait(800);
-          out.ctxSink = audioCtx.sinkId === real; out.soundSink = muteSound.sinkId === real && unmuteSound.sinkId === real;
+          out.ctxSink = engine.audioCtx.sinkId === real; out.soundSink = muteSound.sinkId === real && unmuteSound.sinkId === real;
           out.saved = JSON.parse(localStorage.getItem(PREFS_KEY)).outputId === real;
         }
         state.outputId = 'not-a-device'; state.outputName = 'Gone speakers';
         await loadOutputs(); await wait(200);
-        out.goneHint = $('outputHint').textContent; out.goneValue = pick.value; out.goneCtx = audioCtx.sinkId; out.keptName = state.outputName;
+        out.goneHint = $('outputHint').textContent; out.goneValue = pick.value; out.goneCtx = engine.audioCtx.sinkId; out.keptName = state.outputName;
         state.outputId = 'default'; state.outputName = null;
         await loadOutputs();
         out.hasReal = !!real;
@@ -619,7 +619,7 @@ async function liveChecks(profile, wav, fixture) {
         const during = { live, status: $('devStatus').textContent, retrying: startupRetries > 0 };
         delete navigator.mediaDevices.getUserMedia;
         await wait(6500);
-        return { during, recovered: live, capturing: !!stream, status: $('devStatus').textContent };
+        return { during, recovered: live, capturing: !!engine.stream, status: $('devStatus').textContent };
       });
       check('audio not ready at login: it keeps trying and recovers', retry.during.live === false && retry.during.retrying && retry.recovered && retry.capturing && !retry.status, `first attempt live: ${retry.during.live}, recovered: ${retry.recovered}, capturing: ${retry.capturing}`);
       const helperPid = () => { try { return execFileSync('powershell.exe', ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "Name='win-audio.exe'" | Where-Object { $_.ParentProcessId -eq ${copy.proc.pid} }).ProcessId`]).toString().trim(); } catch { return ''; } };
@@ -635,19 +635,19 @@ async function liveChecks(profile, wav, fixture) {
       // The fake mic has no virtual cable, so this builds a send chain on the default (muted) output instead.
       const chainUse = await copy.call(async () => {
         clearTimeout(startupRetryTimer); startupRetries = 99;   // no cable here: stop looking, or the retry removes the stand-in chain
-        const wait = ms => new Promise(r => setTimeout(r, ms)), level = async () => { let p = 0; for (let i = 0; i < 100; i++) { p = Math.max(p, chainAmplitude(meterChain())); await wait(30); } return 20 * Math.log10(p + 1e-9); };
+        const wait = ms => new Promise(r => setTimeout(r, ms)), level = async () => { let p = 0; for (let i = 0; i < 100; i++) { p = Math.max(p, engine.chainAmplitude(engine.meterChain())); await wait(30); } return 20 * Math.log10(p + 1e-9); };
         const saved = state.nrAmount; state.nr = false; applyNr();
         state.gateAuto = false; state.gateDb = -60;      // gate wide open: the file's noise-only part must still reach the meter
         updateGate();
-        const ctx = new AudioContext({ sampleRate: 48000 }); sendCtx = ctx; sendNodes = buildChain(ctx); connectSendSource(); syncChains();
+        const ctx = new AudioContext({ sampleRate: 48000 }); engine.useSendContext(ctx);
         await wait(2500);                                // lets its worklets load
-        const sending = { main: audioCtx.state, send: ctx.state, meterIsSend: meterChain() === sendNodes, level: await level() };
+        const sending = { main: engine.audioCtx.state, send: ctx.state, meterIsSend: engine.meterChain() === engine.sendChain, level: await level() };
         setMonitor(true); await wait(1000);
-        const listening = { main: audioCtx.state, meterIsMain: meterChain() === eqNodes, level: await level() };
+        const listening = { main: engine.audioCtx.state, meterIsMain: engine.meterChain() === engine.mainChain, level: await level() };
         setMonitor(false); await wait(800);
-        const back = audioCtx.state;
-        teardownSend(); await wait(800);
-        const after = { main: audioCtx.state, meterIsMain: meterChain() === eqNodes, level: await level() };
+        const back = engine.audioCtx.state;
+        engine.closeSend(); await wait(800);
+        const after = { main: engine.audioCtx.state, meterIsMain: engine.meterChain() === engine.mainChain, level: await level() };
         state.nr = true; state.nrAmount = saved; state.gateAuto = true; applyNr(); updateGate();
         return { sending, listening, back, after };
       });
@@ -664,44 +664,44 @@ async function liveChecks(profile, wav, fixture) {
         setMonitor(true); await wait(1500);
         out.enabled = !$('testBtn').disabled;
         $('testBtn').click(); await wait(400);
-        out.recording = !!micTest && micTest.phase === 'recording' && /^Recording/.test($('testBtn').textContent);
-        out.listenWhileRecording = eqNodes.outGain.gain.value;
+        out.recording = !!engine.micTest && engine.micTest.phase === 'recording' && /^Recording/.test($('testBtn').textContent);
+        out.listenWhileRecording = engine.mainChain.outGain.gain.value;
         await wait(5200);
-        const t = micTest;
+        const t = engine.micTest;
         out.playing = !!t && t.phase === 'playing';
         out.seconds = t && t.seconds; out.peak = t && t.peakDb;
-        out.ownOutput = !!(t && t.src && t.src.context === audioCtx);
+        out.ownOutput = !!(t && t.src && t.src.context === engine.audioCtx);
         await wait(300);
-        out.listenWhilePlaying = eqNodes.outGain.gain.value;
+        out.listenWhilePlaying = engine.mainChain.outGain.gain.value;
         $('testBtn').click(); await wait(300);
-        out.stopped = !micTest && $('testBtn').textContent === 'Test mic';
-        out.listenAfter = eqNodes.outGain.gain.value;
+        out.stopped = !engine.micTest && $('testBtn').textContent === 'Test mic';
+        out.listenAfter = engine.mainChain.outGain.gain.value;
         // Muted: it still records, and nothing leaves Olive meanwhile
         toggleMute(); await wait(300);
         $('testBtn').click(); await wait(400);
-        out.mutedHint = $('testHint').textContent; out.mutedOut = eqNodes.outGain.gain.value;
+        out.mutedHint = $('testHint').textContent; out.mutedOut = engine.mainChain.outGain.gain.value;
         await wait(5200);
-        out.mutedPeak = micTest && micTest.peakDb;
-        if (micTest) endMicTest(micTest, '');
+        out.mutedPeak = engine.micTest && engine.micTest.peakDb;
+        if (engine.micTest) engine.endMicTest();
         toggleMute();
         // The gate shut the whole time: it says so
         state.gateDb = -10; updateGate(); await wait(800);
         $('testBtn').click(); await wait(5600);
         out.shutHint = $('testHint').textContent;
-        if (micTest) endMicTest(micTest, '');
+        if (engine.micTest) engine.endMicTest();
         setMonitor(false);
         // While sending: recorded from the sending engine, played on your output, and that engine sleeps again afterwards
         state.gateDb = -60; updateGate();
-        const ctx = new AudioContext({ sampleRate: 48000 }); sendCtx = ctx; sendNodes = buildChain(ctx); connectSendSource(); syncChains();
+        const ctx = new AudioContext({ sampleRate: 48000 }); engine.useSendContext(ctx);
         await wait(2500);
         $('testBtn').click(); await wait(5500);
-        const s = micTest;
-        out.sendRecordedFrom = s && s.ch === sendNodes; out.sendPlayedOn = s && s.src && s.src.context === audioCtx; out.sendPeak = s && s.peakDb;
-        out.mainWhilePlaying = audioCtx.state;
-        if (s) endMicTest(s, '');
+        const s = engine.micTest;
+        out.sendRecordedFrom = s && s.ch === engine.sendChain; out.sendPlayedOn = s && s.src && s.src.context === engine.audioCtx; out.sendPeak = s && s.peakDb;
+        out.mainWhilePlaying = engine.audioCtx.state;
+        if (s) engine.endMicTest();
         await wait(500);
-        out.mainAfter = audioCtx.state;
-        teardownSend(); await wait(500);
+        out.mainAfter = engine.audioCtx.state;
+        engine.closeSend(); await wait(500);
         state.nr = true; applyNr(); state.gateAuto = true; updateGate();
         return out;
       });
