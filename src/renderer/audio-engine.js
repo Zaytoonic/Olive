@@ -1,7 +1,7 @@
 // The audio chain: mic capture, noise reduction, EQ, volume, gate, compressor, and the two ways out
 // (Listen on your output, and the send chain on the virtual cable). It never touches the page, saved settings or Windows:
 // the window tells it what you set with engine.set({...}) and reads levels and status back.
-// Loaded before renderer.js. A different window (a React one, say) can drive it the same way.
+// Loaded before the window's bundle (ui/olive.js, built from src/ui), which drives it.
 const engine = (() => {
   // What the window has set. inputGain is the in-app volume (1 when Windows controls the mic level itself).
   // talking is false while muted or while the push-to-talk key is up; talkFade is how fast that change ramps.
