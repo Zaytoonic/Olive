@@ -88,13 +88,14 @@ export function setVolume(v) {
   ui(); scheduleSave();
 }
 export function setGateDb(v) { state.gateDb = v; updateGate(); scheduleSave(); }
-export function setGateAuto(on) { state.gateAuto = on; updateGate(); scheduleSave(); }
-export function setNr(on) { state.nr = on; applyNr(); updateHints(); scheduleSave(); }
+// Switches save at once; sliders save shortly after each move, and at once when let go (bits.jsx).
+export function setGateAuto(on) { state.gateAuto = on; updateGate(); savePrefs(); }
+export function setNr(on) { state.nr = on; applyNr(); updateHints(); savePrefs(); }
 export function setNrAmount(v) { state.nrAmount = v; applyNr(); updateHints(); scheduleSave(); }
-export function setMono(on) { state.mono = on; applyMono(); scheduleSave(); }
-export function setSendWanted(on) { sendWanted = on; scheduleSave(); setSend(on); }
+export function setMono(on) { state.mono = on; applyMono(); savePrefs(); }
+export function setSendWanted(on) { sendWanted = on; savePrefs(); setSend(on); }
 export function setMonitorVol(v) { state.monitorVol = v; engine.set({ monitorVol: v }); updateHints(); scheduleSave(); }
-export function setComp(on) { state.comp = on; applyComp(); updateHints(); scheduleSave(); }
+export function setComp(on) { state.comp = on; applyComp(); updateHints(); savePrefs(); }
 export function setCompAmount(v) { state.compAmount = v; applyComp(); updateHints(); scheduleSave(); }
 document.addEventListener('keydown', e => { if (e.ctrlKey && !e.altKey && !e.repeat && e.key.toLowerCase() === 'm' && !hotkeyChoosing && !pttChoosing) toggleMute(); });
 
@@ -111,7 +112,7 @@ function applyMuteSoundVol() {
   muteSound.volume = unmuteSound.volume = (state.muteSoundVol / 100) ** 2;
   ui({ soundHint: state.muteSounds ? "Play where Listen plays. Discord doesn't hear them" : 'Off: muting and unmuting are silent' });
 }
-export function setMuteSounds(on) { state.muteSounds = on; applyMuteSoundVol(); if (on) playMuteSound(true); scheduleSave(); }
+export function setMuteSounds(on) { state.muteSounds = on; applyMuteSoundVol(); if (on) playMuteSound(true); savePrefs(); }
 export function setMuteSoundVol(v) { state.muteSoundVol = v; applyMuteSoundVol(); scheduleSave(); }
 export const previewMuteSound = () => playMuteSound(true);   // let go of the slider: hear the new level
 
@@ -134,7 +135,7 @@ function setMutedUi(m) {
   if (window.appMute) window.appMute.setState(state.muted);
 }
 export function setMonitor(on) {
-  state.monitor = on;
+  state.monitor = on;                           // not saved: Listen at launch could cause feedback
   engine.set({ monitor: on, monitorVol: state.monitorVol });
   updateHints();
 }
@@ -386,11 +387,11 @@ function updateSendStatus() {
   else if (state.ptt && !pttOpen) sendHint(state.pttKey ? `Push to talk: hold ${state.pttKey.label} to send` : 'Push to talk: choose a key below', 'on');
   else sendHint('Sending. In Discord, choose "CABLE Output" as your input', 'on');
 }
-async function findCable() {
+let findCable = async function findCable() {
   const all = await navigator.mediaDevices.enumerateDevices();
   const outs = all.filter(d => d.kind === 'audiooutput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
   return outs.find(d => /CABLE Input/i.test(d.label)) || outs.find(d => isCableLabel(d.label)) || null;
-}
+};
 function stopSending() { state.send = false; engine.set({ send: false }); engine.closeSend(); ui({ sendOn: false }); }
 async function setSend(on) {
   const token = ++sendToken;
@@ -641,7 +642,7 @@ async function applyMuteHotkey() {
   const ok = await window.appMute.setHotkey(state.muteAccel);
   ui({ muteKeyHint: ok ? `${label} mutes your mic from anywhere` : `${label} is already in use by another app` });
 }
-export function setMuteHotkeyOn(on) { state.muteHotkey = on; applyMuteHotkey(); scheduleSave(); ui(); }
+export function setMuteHotkeyOn(on) { state.muteHotkey = on; applyMuteHotkey(); savePrefs(); ui(); }
 // Changing the shortcut: the next key combination pressed in this window becomes it.
 // The old one is released while choosing, otherwise pressing it again would never reach this window.
 let hotkeyChoosing = false;
@@ -734,7 +735,7 @@ async function applyPtt() {
 export function setPtt(on) {
   state.ptt = on;
   if (on && !state.pttKey) startChoosingPtt();
-  applyPtt(); scheduleSave(); ui();
+  applyPtt(); savePrefs(); ui();
 }
 function finishChoosingPtt(key) {
   pttChoosing = false;
@@ -844,8 +845,8 @@ function applyBadge(preview) {
   ui({ badgeHint: state.badge ? "Shows over other apps and windowed games while you're muted" : 'Off: the tray icon still turns red while muted' });
   if (window.appBadge) window.appBadge.set(state.badge, state.badgeCorner, preview).catch(() => {});
 }
-export function setBadge(on) { state.badge = on; applyBadge(true); scheduleSave(); }
-export function setBadgeCorner(c) { state.badgeCorner = c; applyBadge(true); scheduleSave(); }
+export function setBadge(on) { state.badge = on; applyBadge(true); savePrefs(); }
+export function setBadgeCorner(c) { state.badgeCorner = c; applyBadge(true); savePrefs(); }
 function initBadge() {
   if (!window.appBadge) { ui({ badgeAvailable: false, badgeHint: 'Only in the Windows app' }); return; }
   applyBadge(false);
@@ -891,7 +892,7 @@ export function pressUpdate() {
   else window.appInfo.open('release');
 }
 export const openReleaseNotes = () => { if (window.appInfo) window.appInfo.open('release'); };
-export function setUpdateAuto(on) { state.updateAuto = on; scheduleSave(); ui(); }
+export function setUpdateAuto(on) { state.updateAuto = on; savePrefs(); ui(); }
 function initUpdates() {
   if (window.appInfo) {
     window.appInfo.onUpdateProgress(p => { if (updating) ui({ updateHint: `Downloading… ${Math.floor(p * 100)}%` }); });
@@ -976,5 +977,47 @@ export function start() {
   let deviceChangeTimer = null;
   navigator.mediaDevices.addEventListener('devicechange', () => { clearTimeout(deviceChangeTimer); deviceChangeTimer = setTimeout(loadDevices, 400); });
 }
-// For the audio test (tools/audio-test), which drives the window from outside.
-window.olive = { state, getView, eq, toggleMute, setMonitor, setSendWanted, savePrefs, loadDevices, selectBand, setEqOpen, setSettingsOpen, PREFS_KEY };
+// ---- For the audio test (tools/audio-test), which drives the window from outside ----
+// It was written against the old page, whose functions and settings were page globals; these give it the same names.
+// $(id) finds elements by their old ids, including the hidden native <select> and switch inputs that React Aria
+// renders inside its components (changing those drives the real components).
+const TEST_CONTROLS = {
+  micSelect: '.olive-mic-select select', outputSelect: '.olive-output-select select', eqPreset: '.olive-preset select', badgeCorner: '.olive-badge-corner select',
+  settingsPanel: '.olive-drawer-dialog', settingsScrim: '.olive-backdrop', soundVol: '[aria-label="Mute sound volume"] input',
+  muteKeyToggle: 'input[aria-label="Mute hotkey"]', pttToggle: 'input[aria-label="Push to talk"]', soundToggle: 'input[aria-label="Mute sounds"]',
+  badgeToggle: 'input[aria-label="Muted badge on screen"]', updateAuto: 'input[aria-label="Check for updates automatically"]', startupToggle: 'input[aria-label="Start with Windows"]',
+  sendToggle: 'input[aria-label="Send to Discord / other apps"]', nrToggle: 'input[aria-label="Noise reduction"]', compToggle: 'input[aria-label="Compressor"]',
+  monoToggle: 'input[aria-label="Mono audio"]', monToggle: 'input[aria-label="Mic monitoring"]', eqToggle: 'input[aria-label="Enable EQ"]'
+};
+const testGlobals = {
+  state, eq, EQ_BANDS, PREFS_KEY, OLD_PREFS_KEY, muteSound, unmuteSound, sysApi, eqBandsReset, olive: null,
+  toggleMute, setMonitor, savePrefs, loadDevices, selectDevice, selectBand, setEqOpen, eqEdited, applyEq, applyNr, updateGate, setMutedUi, onMicKey, micKeyResult,
+  updateSetup, loadOutputs, syncTicker, applyPtt, applyMuteHotkey, checkUpdates, isCableLabel, currentDevice, updateHints,
+  restoreEq: src => { eqPresetPref = restoreEq(src); },
+  snapshotEq: () => snapshotEq(view.eqPreset),
+  showEqPreset: () => ui({ eqPreset: presetShown() }),
+  syncEqUi: () => applyEq(),
+  eqPoint: key => (eqGraph ? eqGraph.point(key) : null),
+  setView: p => ui(p),
+  // The settings live in a drawer that only exists while open: these open it (resolving once it's on screen) and close it.
+  openSettings: () => new Promise(resolve => {
+    setSettingsOpen(true);
+    const t0 = performance.now();
+    (function wait() {
+      if (document.querySelector('.olive-drawer-dialog')) setTimeout(() => resolve(true), 50);
+      else if (performance.now() - t0 > 3000) resolve(false);
+      else setTimeout(wait, 30);                // timers, not animation frames: the test copy's window is hidden
+    })();
+  }),
+  closeSettings: () => new Promise(resolve => { setSettingsOpen(false); setTimeout(() => resolve(true), 400); }),
+  $: id => document.getElementById(id) || (TEST_CONTROLS[id] ? document.querySelector(TEST_CONTROLS[id]) : null)
+};
+testGlobals.olive = { state, getView, eq, toggleMute, setMonitor, setSendWanted, savePrefs, loadDevices, selectBand, setEqOpen, setSettingsOpen, PREFS_KEY };
+for (const [k, v] of Object.entries(testGlobals)) window[k] = v;
+const testVars = {
+  freshInstall: [() => freshInstall, v => { freshInstall = v; }], startupRetries: [() => startupRetries, v => { startupRetries = v; }],
+  startupRetryTimer: [() => startupRetryTimer], live: [() => live], findCable: [() => findCable, v => { findCable = v; }],
+  pttOpen: [() => pttOpen], prefDeviceName: [() => prefDeviceName], devices: [() => devices],
+  sendWanted: [() => sendWanted, v => { sendWanted = v; }], windowHidden: [() => windowHidden, v => { windowHidden = v; }]
+};
+for (const [k, [get, set]] of Object.entries(testVars)) Object.defineProperty(window, k, { get, set: set || (() => {}), configurable: true });

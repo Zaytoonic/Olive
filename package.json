@@ -5,8 +5,9 @@
   "license": "MIT",
   "main": "src/main/main.js",
   "scripts": {
-    "prestart": "node tools/build-helper.js",
+    "prestart": "node tools/build-helper.js && vite build",
     "start": "electron .",
+    "build:ui": "vite build",
     "build": "node tools/build.js",
     "patch-exe": "node tools/patch-exe.js",
     "make-icons": "node tools/make-icons.js",

@@ -17,8 +17,11 @@ if (running) {
   process.exit(1);
 }
 require('./build-helper').buildHelper();
+// The window is React (src/ui): build it into src/renderer/ui first. Its source isn't needed in the app.
+execFileSync(process.execPath, [path.join(root, 'node_modules', 'vite', 'bin', 'vite.js'), 'build'], { cwd: root, stdio: 'inherit' });
 fs.rmSync(appDir, { recursive: true, force: true });
-for (const dir of ['src', 'assets']) fs.cpSync(path.join(root, dir), path.join(appDir, dir), { recursive: true });
+const uiSource = path.join(root, 'src', 'ui');
+for (const dir of ['src', 'assets']) fs.cpSync(path.join(root, dir), path.join(appDir, dir), { recursive: true, filter: p => p !== uiSource && !p.startsWith(uiSource + path.sep) });
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 // Keep "name" unchanged: Electron stores settings in a folder named after it. src/main/migrate.js moved them from the old name.
 fs.writeFileSync(path.join(appDir, 'package.json'), JSON.stringify({ name: pkg.name, version: pkg.version, main: pkg.main }, null, 2) + '\n');

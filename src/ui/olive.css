@@ -151,10 +151,13 @@ body {
 /* Input level meter: the colours are fixed and a cover slides over them (transform only). */
 .olive-meter-block { display: flex; flex-direction: column; gap: 6px; }
 .olive-meter-title { display: inline-flex; align-items: center; gap: 8px; }
-.olive-meter { position: relative; height: 14px; border-radius: 7px; overflow: hidden; background: var(--tile); }
-.olive-meter-fill { position: absolute; inset: 0; background: linear-gradient(90deg, var(--meter-green) 0 66%, var(--meter-yellow) 66% 83%, var(--meter-red) 83%); }
+/* contain: repaints of the moving parts stay inside the bar (Olive paints on the CPU). */
+.olive-meter { position: relative; height: 14px; border-radius: 7px; overflow: hidden; background: var(--tile); contain: strict; }
+.olive-meter-fill { position: absolute; inset: 0; background: linear-gradient(90deg, var(--meter-green) 0%, var(--meter-green) 66%, var(--meter-yellow) 83%, var(--meter-red) 100%); }
 .olive-meter-cover { position: absolute; inset: 0; background: var(--tile); transform-origin: right center; transform: scaleX(1); will-change: transform; }
-.olive-meter-peak { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: #fff; transform: translateX(0); will-change: transform; }
+/* The peak element spans the bar, so translateX(%) moves it by a share of the bar; its ::before is the line. */
+.olive-meter-peak { position: absolute; inset: 0; transform: translateX(0); will-change: transform; pointer-events: none; }
+.olive-meter-peak::before { content: ''; position: absolute; top: 0; bottom: 0; left: -2px; width: 2px; background: #fff; opacity: 0.85; }
 .olive-meter[data-muted] .olive-meter-fill { filter: grayscale(1) brightness(0.55); }
 .olive-gate-mark { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--gate-orange); border-radius: 1px; }
 .olive-scale { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; color: var(--text-2); }
@@ -167,7 +170,7 @@ body {
 
 /* Send level */
 .olive-send-level { display: flex; align-items: center; gap: 10px; }
-.olive-mini-meter { position: relative; flex: 1; max-width: 220px; height: 6px; border-radius: 3px; overflow: hidden; background: var(--tile); }
+.olive-mini-meter { position: relative; flex: 1; max-width: 220px; height: 6px; border-radius: 3px; overflow: hidden; background: var(--tile); contain: strict; }
 .olive-mini-fill { position: absolute; inset: 0; background: linear-gradient(90deg, var(--meter-green) 0 66%, var(--meter-yellow) 66% 83%, var(--meter-red) 83%); }
 .olive-mini-cover { position: absolute; inset: 0; background: var(--tile); transform-origin: right center; transform: scaleX(1); will-change: transform; }
 
@@ -221,3 +224,8 @@ body {
 .button--ghost { --button-fg: var(--text-2); }
 .button--ghost:hover { --button-fg: var(--foreground); }
 .olive-setup { padding: 16px; gap: 12px; }
+.olive-hint:empty { display: none; }
+[hidden] { display: none !important; }
+.olive-tip { display: inline-flex; }
+.olive-pick { min-width: 0; }
+.olive-mic-select { flex: 1; }

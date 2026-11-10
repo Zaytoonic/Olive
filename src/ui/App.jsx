@@ -41,14 +41,17 @@ function Section({ title, children }) {
 }
 
 function Header() {
-  const reasons = useV(v => S.settingsReasons(v).join('; '));
+  const reasons = useV(v => S.settingsReasons(v).join('; ')), open = useV(v => v.settingsOpen), gear = useRef(null);
+  const title = reasons ? 'Settings: ' + reasons : 'Settings';
+  useEffect(() => { if (gear.current) gear.current.title = title; }, [title]);   // HeroUI's Button doesn't pass title on
   return (
     <header className="olive-toolbar">
       <img className="olive-logo" src="../../assets/icon.png" alt="" width="26" height="26" />
       <h1>Olive</h1>
-      <Button isIconOnly variant="ghost" className="olive-gear" aria-label="Settings" onPress={() => S.setSettingsOpen(true)}>
-        <span title={reasons ? 'Settings: ' + reasons : 'Settings'} className="olive-icon">{Icon.gear}</span>
-        {reasons && <span className="olive-dot" aria-hidden="true" />}
+      <Button ref={gear} id="settingsBtn" isIconOnly variant="ghost" className="olive-gear" aria-label="Settings" aria-haspopup="dialog" aria-expanded={open}
+        onPress={() => S.setSettingsOpen(true)}>
+        <span className="olive-icon">{Icon.gear}</span>
+        <span id="settingsDot" className="olive-dot" aria-hidden="true" hidden={!reasons} />
       </Button>
     </header>
   );
@@ -56,23 +59,22 @@ function Header() {
 
 function SetupCard() {
   const shown = useV(v => v.setupCardShown), cable = useV(v => v.setupCable), download = useV(v => v.setupDownloadShown);
-  if (!shown) return null;
   return (
-    <Card className="olive-card olive-setup">
+    <Card id="setupCard" className="olive-card olive-setup" hidden={!shown}>
       <Card.Header><Card.Title>Set up Olive for Discord</Card.Title></Card.Header>
       <Card.Content>
         <ol className="olive-steps">
           <li>
             <span>Install VB-Audio Virtual Cable: it's how Olive's sound reaches other apps. Restart your PC afterwards.</span>
-            <Hint>{cable}</Hint>
-            {download && <Button size="sm" variant="secondary" onPress={S.setupDownload}>Open the download page</Button>}
+            <Hint id="setupCable">{cable}</Hint>
+            <Button id="setupDownload" size="sm" variant="secondary" onPress={S.setupDownload} hidden={!download}>Open the download page</Button>
           </li>
           <li><span>In Discord, go to <b>User Settings &gt; Voice &amp; Video</b> and set the input device to <b>CABLE Output</b>.</span></li>
         </ol>
       </Card.Content>
       <Card.Footer className="olive-setup-actions">
         <Button size="sm" variant="secondary" onPress={S.setupCheck}>Check again</Button>
-        <Button size="sm" onPress={S.setupFinished}>Done</Button>
+        <Button id="setupDone" size="sm" onPress={S.setupFinished}>Done</Button>
       </Card.Footer>
     </Card>
   );
@@ -92,23 +94,23 @@ function MicCard() {
             <div className="olive-mic-pick">
               <Pick label="Selected microphone" items={devices} value={devices.some(d => d.id === deviceId) ? deviceId : null}
                 onChange={S.selectDevice} isDisabled={micDisabled} placeholder={placeholder} title="Choose a microphone" className="olive-mic-select" />
-              <Button isIconOnly variant="ghost" size="sm" aria-label="Refresh the microphone list" onPress={() => S.loadDevices()}>
+              <Button id="refreshBtn" isIconOnly variant="ghost" size="sm" aria-label="Refresh the microphone list" onPress={() => S.loadDevices()}>
                 <span className="olive-icon" title="Refresh the microphone list">{Icon.refresh}</span>
               </Button>
             </div>
-            <Hint tone="notice">{micNotice}</Hint>
-            <Hint>{devStatus}</Hint>
-            <Hint tone="notice">{appNotice}</Hint>
-            <Hint live>{testHint}</Hint>
+            <Hint id="micNotice" tone="notice">{micNotice}</Hint>
+            <Hint id="devStatus">{devStatus}</Hint>
+            <Hint id="appNotice" tone="notice">{appNotice}</Hint>
+            <Hint id="testHint" live>{testHint}</Hint>
           </div>
           <div className="olive-actions">
-            <Button variant="secondary" isDisabled={testDisabled} onPress={S.pressTest} className="olive-pill" data-phase={testPhase || undefined}>
+            <Button id="testBtn" variant="secondary" isDisabled={testDisabled} onPress={S.pressTest} className="olive-pill" data-phase={testPhase || undefined}>
               <span title="Record 5 seconds, then hear exactly what Olive sends to Discord">{testLabel}</span>
             </Button>
-            <ToggleButton isSelected={monitor} onChange={S.setMonitor} className="olive-pill olive-listen" aria-label="Listen">
+            <ToggleButton id="listenBtn" isSelected={monitor} onChange={S.setMonitor} className="olive-pill olive-listen" aria-label="Listen">
               <span title="Hear your mic live (use headphones)">{monitor ? 'Listening' : 'Listen'}</span>
             </ToggleButton>
-            <Button variant={muted ? 'danger' : 'secondary'} onPress={S.toggleMute} aria-pressed={muted} className="olive-pill olive-mute">
+            <Button id="muteBtn" variant={muted ? 'danger' : 'secondary'} onPress={S.toggleMute} aria-pressed={muted} className="olive-pill olive-mute">
               <span className="olive-icon small">{muted ? Icon.micOff : Icon.mic}</span><span title={muteTitle}>{muted ? 'Muted' : 'Mute'}</span>
             </Button>
           </div>
@@ -134,9 +136,9 @@ function InputMeter() {
       <div className="olive-row-head">
         <span className="olive-meter-title">
           <span className="olive-caption">Input level</span>
-          <span ref={chip} className="olive-gate-chip" data-state="none" title="Whether your sound is getting through to other apps" />
+          <span ref={chip} id="gateChip" className="olive-gate-chip" data-state="none" title="Whether your sound is getting through to other apps" />
         </span>
-        <span ref={levelDb} className="olive-value">-∞ dB</span>
+        <span ref={levelDb} id="levelDb" className="olive-value">-∞ dB</span>
       </div>
       <div className="olive-meter" data-muted={muted || undefined}>
         <div className="olive-meter-fill" />
@@ -199,8 +201,8 @@ function Send() {
   return (
     <Row title="Send to Discord / other apps"
       end={<Toggle label="Send to Discord / other apps" title={title} isSelected={on} onChange={S.setSendWanted} />}>
-      <Hint tone={cls === 'warn' ? 'warn' : cls === 'on' ? 'on' : undefined} title={title}>{hint}</Hint>
-      {setupOpen && <div><Button size="sm" variant="secondary" onPress={S.setupShow}>Show setup steps</Button></div>}
+      <Hint id="sendHint" tone={cls === 'warn' ? 'warn' : cls === 'on' ? 'on' : undefined} title={title}>{hint}</Hint>
+      <div hidden={!setupOpen}><Button id="setupOpen" size="sm" variant="secondary" onPress={S.setupShow}>Show setup steps</Button></div>
       <SendLevel shown={levelShown} />
     </Row>
   );
@@ -236,8 +238,8 @@ function Monitoring() {
 function OutputDevice() {
   const outputs = useV(v => v.outputs), sel = useV(v => v.outputSelected), hint = useV(v => v.outputHint);
   return (
-    <Row title="Listen and mute sounds play on" hint={hint} hintTone="notice">
-      <Pick label="Listen and mute sounds play on" items={outputs} value={sel} onChange={S.chooseOutput}
+    <Row title="Listen and mute sounds play on" hint={hint} hintTone="notice" hintId="outputHint">
+      <Pick label="Listen and mute sounds play on" items={outputs} value={sel} onChange={S.chooseOutput} className="olive-output-select"
         title="Where you hear yourself and the mute sounds. Discord doesn't hear either." />
     </Row>
   );

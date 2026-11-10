@@ -92,6 +92,7 @@ async function updateChecks(exe, profile) {
   try {
     spawn(exe, [`--user-data-dir=${profile}`, '--hidden', '--mute-audio', `--remote-debugging-port=${CDP}`], { stdio: 'ignore', detached: true, env }).unref();
     p = await page();
+    await p.run('openSettings()');
     await p.run('checkUpdates(true)');
     const offer = await p.run(`({ hint: $('updateHint').textContent, button: $('updateBtn').textContent, notes: !$('updateNotes').hidden })`);
     check('an installed copy offers Install', /99\.0\.0 is available/.test(offer.hint) && offer.button === 'Install' && offer.notes, `"${offer.hint}", button "${offer.button}"`);
@@ -117,6 +118,7 @@ async function updateChecks(exe, profile) {
     const owners = (await until(() => { const o = listeners(); return o === newPid ? o : null; }, 15000)) || listeners();
     check('the reopened copy holds nothing of the old one', owners === newPid, `port ${CDP} is held by ${owners || 'nobody'}, the new copy is ${newPid}`);
     p = await page();
+    await p.run('openSettings()');               // the update's status is in the settings drawer
     const after = await until(() => p.run(`/Updated to Olive/.test($('updateHint').textContent) && ({ hint: $('updateHint').textContent, notice: $('appNotice').textContent, hidden: document.hidden })`), 20000);
     const version = execFileSync('powershell.exe', ['-NoProfile', '-Command', `(Get-Item -LiteralPath '${exe}').VersionInfo.FileVersion`], { encoding: 'utf8' }).trim();
     check('it says it was updated, with its settings folder and window back', after && after.hint === `Updated to Olive ${pkg.version}` && !after.notice && relaunched.includes(profile) && !relaunched.includes('--hidden'), after ? `"${after.hint}", exe ${version}` : 'no message');
@@ -130,6 +132,7 @@ async function updateChecks(exe, profile) {
     fs.writeFileSync(lockFile, 'x');
     const holder = spawn('powershell.exe', ['-NoProfile', '-Command', `$f = [IO.File]::Open('${lockFile}', 'Open', 'Read', 'None'); Start-Sleep -Seconds 40; $f.Close()`], { stdio: 'ignore' });
     await sleep(1500);
+    await p.run('openSettings()');
     await p.run('checkUpdates(true)');
     await p.run(`$('updateBtn').click()`);
     p.close(); p = null;

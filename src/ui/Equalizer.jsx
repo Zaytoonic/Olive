@@ -12,10 +12,11 @@ const PRESETS = [...PRESET_NAMES.map(([id, name]) => ({ id, name })), { id: 'cus
 export function Equalizer() {
   const open = useV(v => v.st.eqOpen), forMic = useV(v => v.eqFor), notice = useV(v => v.eqNotice), preset = useV(v => v.eqPreset);
   useV(v => v.eqVersion);                        // re-render when the EQ changes (its on/off switch reads eq.on)
+  useEffect(() => { if (open) requestAnimationFrame(() => { const b = document.getElementById('eqBody'); if (b) b.scrollIntoView({ block: 'nearest' }); }); }, [open]);
   return (
     <div className="olive-eq" data-off={!eq.on || undefined}>
       <div className="olive-eq-top">
-        <button type="button" className="olive-eq-summary" aria-expanded={open} onClick={() => S.setEqOpen(!open)} title="Show or hide the EQ graph">
+        <button id="eqExpand" type="button" className="olive-eq-summary" aria-controls="eqBody" aria-expanded={open} onClick={() => S.setEqOpen(!open)} title="Show or hide the EQ graph">
           <span className="olive-icon olive-chevron">{Icon.chevron}</span>
           <span className="olive-eq-title">
             <span className="olive-row-title">Mic EQ</span>
@@ -28,7 +29,8 @@ export function Equalizer() {
           <Toggle label="Enable EQ" title="Enable EQ" isSelected={eq.on} onChange={S.setEqOn} />
         </div>
       </div>
-      {open && <EqBody />}
+      {/* Always in the page, hidden while closed, like the old window: the graph keeps its keyboard handling. */}
+      <div id="eqBody" hidden={!open}><EqBody /></div>
     </div>
   );
 }
@@ -40,13 +42,12 @@ function EqBody() {
   useEffect(() => {
     const g = mountEqGraph(canvas.current, { sel: () => S.getView().eqSel, select: S.selectBand, edited: S.eqEdited, editEnd: S.eqEditEnd });
     const detach = S.attachEqGraph(g);
-    requestAnimationFrame(() => body.current && body.current.scrollIntoView({ block: 'nearest' }));
     return () => { detach(); g.destroy(); };
   }, []);
   const d = sel && bandDef(sel), s = sel && eq.b[sel];
   return (
     <div ref={body} className="olive-eq-body">
-      <canvas ref={canvas} className="olive-eq-canvas" width="600" height="220" tabIndex={0} aria-label="EQ graph: drag points to shape your sound" />
+      <canvas ref={canvas} id="eqCurve" className="olive-eq-canvas" width="600" height="220" tabIndex={0} aria-label="EQ graph: drag points to shape your sound" />
       <div className="olive-eq-tools">
         <div className="olive-eq-chips" role="tablist" aria-label="EQ bands">
           {EQ_BANDS.map((b, i) => (
@@ -71,7 +72,7 @@ function EqBody() {
             <span className="olive-lowcut">Low cut (80 Hz) · removes rumble and desk thumps</span>
           </Switch.Content>
         </Switch>
-        <Button size="sm" variant={bypass ? 'primary' : 'secondary'} isDisabled={!(monitor && eq.on)}
+        <Button id="eqCompare" size="sm" variant={bypass ? 'primary' : 'secondary'} isDisabled={!(monitor && eq.on)}
           onPressStart={() => S.holdCompare(true)} onPressEnd={() => S.holdCompare(false)}>
           <span title="Turn on Listen, then hold this to hear yourself without the EQ. Discord keeps hearing the EQ.">{bypass ? 'Hearing without EQ' : 'Hold to compare'}</span>
         </Button>

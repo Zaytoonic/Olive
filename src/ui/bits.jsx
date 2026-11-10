@@ -1,24 +1,30 @@
 // Small building blocks on top of HeroUI, so every row in Olive looks and behaves the same.
 import { Label, ListBox, Select, Slider, Switch } from '@heroui/react';
+import { savePrefs } from './store.js';
 
-export const Hint = ({ children, tone, title, live }) =>
-  children ? <p className="olive-hint" data-tone={tone || undefined} title={title || undefined} aria-live={live ? 'polite' : undefined}>{children}</p> : null;
+// Always rendered (an empty hint is hidden by CSS), so its text can be read and announced when it appears.
+export const Hint = ({ children, tone, title, live, id }) =>
+  <p id={id} className="olive-hint" data-tone={tone || undefined} title={title || undefined} aria-live={live ? 'polite' : undefined}>{children}</p>;
 
-export const Value = ({ children }) => <span className="olive-value">{children}</span>;
+export const Value = ({ children, id }) => <span id={id} className="olive-value">{children}</span>;
 
+// HeroUI's components don't pass a title on to the page, so hover text goes on a wrapper.
 export function Toggle({ label, isSelected, onChange, isDisabled, title }) {
   return (
-    <Switch aria-label={label} isSelected={isSelected} onChange={onChange} isDisabled={isDisabled} size="md">
-      <Switch.Content title={title}>
-        <Switch.Control><Switch.Thumb /></Switch.Control>
-      </Switch.Content>
-    </Switch>
+    <span className="olive-tip" title={title}>
+      <Switch aria-label={label} isSelected={isSelected} onChange={onChange} isDisabled={isDisabled} size="md">
+        <Switch.Content>
+          <Switch.Control><Switch.Thumb /></Switch.Control>
+        </Switch.Content>
+      </Switch>
+    </span>
   );
 }
 
 export function Level({ label, value, onChange, onChangeEnd, min = 0, max = 100, isDisabled }) {
+  const end = v => { savePrefs(); if (onChangeEnd) onChangeEnd(+v); };   // let go of a slider: saved at once
   return (
-    <Slider aria-label={label} value={value} onChange={v => onChange(+v)} onChangeEnd={onChangeEnd && (v => onChangeEnd(+v))}
+    <Slider aria-label={label} value={value} onChange={v => onChange(+v)} onChangeEnd={end}
       minValue={min} maxValue={max} isDisabled={isDisabled} className="olive-slider">
       <Slider.Track>
         <Slider.Fill />
@@ -29,7 +35,7 @@ export function Level({ label, value, onChange, onChangeEnd, min = 0, max = 100,
 }
 
 // A row: title (and its hint) on the left, controls on the right, anything else (a slider) below.
-export function Row({ title, hint, hintTone, value, end, children, htmlFor }) {
+export function Row({ title, hint, hintTone, hintId, value, valueId, end, children, htmlFor }) {
   return (
     <div className="olive-row">
       <div className="olive-row-head">
@@ -37,12 +43,12 @@ export function Row({ title, hint, hintTone, value, end, children, htmlFor }) {
           {htmlFor ? <Label htmlFor={htmlFor} className="olive-row-title">{title}</Label> : <span className="olive-row-title">{title}</span>}
         </div>
         <div className="olive-row-end">
-          {value != null && <Value>{value}</Value>}
+          {value != null && <Value id={valueId}>{value}</Value>}
           {end}
         </div>
       </div>
       {children}
-      <Hint tone={hintTone}>{hint}</Hint>
+      <Hint tone={hintTone} id={hintId}>{hint}</Hint>
     </div>
   );
 }
@@ -50,9 +56,10 @@ export function Row({ title, hint, hintTone, value, end, children, htmlFor }) {
 // A dropdown from a list of { id, name }.
 export function Pick({ label, items, value, onChange, isDisabled, placeholder, title, className }) {
   return (
+    <div className={'olive-pick ' + (className || '')} title={title}>
     <Select aria-label={label} value={value ?? null} onChange={k => k != null && onChange(String(k))} isDisabled={isDisabled}
-      placeholder={placeholder} variant="secondary" fullWidth className={className}>
-      <Select.Trigger title={title}>
+      placeholder={placeholder} variant="secondary" fullWidth>
+      <Select.Trigger>
         <Select.Value />
         <Select.Indicator />
       </Select.Trigger>
@@ -67,6 +74,7 @@ export function Pick({ label, items, value, onChange, isDisabled, placeholder, t
         </ListBox>
       </Select.Popover>
     </Select>
+    </div>
   );
 }
 
