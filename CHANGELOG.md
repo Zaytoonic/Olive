@@ -2,6 +2,12 @@
 
 What changed in each release of Olive. Downloads are on the [Releases](https://github.com/Zaytoonic/Olive/releases) page.
 
+## 1.7.0 (11 November 2026)
+
+- A rebuilt window, with new switches, sliders, dropdowns and buttons. Everything is where it was, and the settings still slide in from the right.
+- The window uses the same CPU as before and about 15 MB more memory.
+- After you plug in or remove a device, or press refresh, Olive keeps looking for your mic for a minute, as it already did at start-up.
+
 ## 1.6.4 (10 November 2026)
 
 - Newer noise reduction: RNNoise's 2025 model, which picks out voices more reliably. It uses a bit more CPU.
