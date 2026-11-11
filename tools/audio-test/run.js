@@ -172,18 +172,48 @@ function voiceChecks() {
     const { pct, silent } = openPct(runVoice(src, 100, 1), runVoice(src, 100, 0));
     check(`gate stays shut on ${name}`, pct <= limit, `open ${f1(pct)}% (limit ${limit}%)${silent ? `, of the ${f1(100 - silent)}% of the time noise reduction left anything` : ''}`);
   }
-  // After a minute or so the network trusts a voice less than when it started, and a gate that needs high confidence
-  // throughout then cuts words (it let through 50% of this file's loudest speech). Scored on the 4th pass through the file.
-  const fx = makeFixture(), p = loadVoice(), prm = { strength: new Float32Array([100]), gate: new Float32Array([1]) };
-  let said = 0, kept = 0;
-  for (let pass = 0; pass < 4; pass++) {
-    for (let i = 0; i + 128 <= fx.samples.length; i += 128) {
-      p.process([[fx.samples.subarray(i, i + 128)]], [[new Float32Array(128)]], prm);
-      const seg = fx.segmentAt(i / SR);
-      if (pass === 3 && seg.kind === 'voice' && seg.level === fx.voiceLevels[0]) { said++; if (p.open) kept++; }
-    }
+  // A long run, the way Olive runs all day: the gate must keep letting real speech through after minutes, not just at the start.
+  // Real speech here is Windows' own speech voice. The fixture's synthetic speech is no stand-in for this: after a minute
+  // the network scores it near 0.64 and turns it down about 12 dB, while a real voice (checked live with
+  // npm run test:gate-live) and Windows speech keep scoring above 0.8.
+  const tts = windowsSpeech();
+  if (!tts) { console.log("  SKIP  speech still opens the gate after 2 minutes: Windows' speech voice isn't available"); return; }
+  const fe = []; for (let i = 0; i + 480 <= tts.length; i += 480) { let e = 0; for (let k = 0; k < 480; k++) e += tts[i + k] ** 2; fe.push(e); }
+  const top = Math.max(...fe), word = fe.map(e => toDb(e) > toDb(top) - 25);   // frames with a word in them, not the pauses
+  let we = 0, wn = 0; fe.forEach((e, j) => { if (word[j]) { we += e; wn += 480; } });
+  const gain = Math.pow(10, -25 / 20) / Math.sqrt(we / wn);                    // words at -25 dB, a normal talking level
+  const total = SR * 150, x = makeNoise(total), said = new Uint8Array(Math.ceil(total / 480));
+  for (let pos = 3 * SR; pos < total; pos += tts.length + 3 * SR) {             // 3 s of room noise between sentences
+    for (let i = 0; i < tts.length && pos + i < total; i++) x[pos + i] += tts[i] * gain;
+    word.forEach((w, j) => { const fr = Math.floor(pos / 480) + j; if (w && fr < said.length) said[fr] = 1; });
   }
-  check(`speech still opens the gate after ${Math.round(3 * fx.seconds)} s of running`, kept / said >= 0.9, `${f1(100 * kept / said)}% of the speech at ${fx.voiceLevels[0]} dB let through (at least 90%)`);
+  const p = loadVoice(), prm = { strength: new Float32Array([100]), gate: new Float32Array([1]) };
+  let heard = 0, kept = 0;
+  for (let i = 0; i + 128 <= total; i += 128) {
+    p.process([[x.subarray(i, i + 128)]], [[new Float32Array(128)]], prm);
+    if (i >= SR * 120 && said[Math.floor(i / 480)]) { heard++; if (p.open) kept++; }   // scored in the last 30 s only
+  }
+  check('speech still opens the gate after 2 minutes', heard > 0 && kept / heard >= 0.9, `${f1(100 * kept / Math.max(1, heard))}% of the words in the last 30 s let through (at least 90%)`);
+}
+// A few sentences from Windows' built-in speech voice, 48 kHz mono, or null if it isn't there.
+function windowsSpeech() {
+  const file = path.join(os.tmpdir(), `olive-audio-test-speech-${process.pid}.wav`);
+  const text = 'Hey, can you hear me alright? I think the game is about to start, so give me one second. ' +
+    'Okay, I am back. Let us push the left side together and wait for the others before we go in. ' +
+    'That was close. Nice work everyone, we should try that again next round.';
+  const ps = `Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; ` +
+    `$f = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(48000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono); ` +
+    `$s.SetOutputToWaveFile('${file}', $f); $s.Speak('${text.replace(/'/g, "''")}'); $s.Dispose()`;
+  try {
+    execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore', timeout: 60000 });
+    const buf = fs.readFileSync(file);
+    let at = 12;                                         // walk the chunks to the audio data
+    while (at + 8 <= buf.length && buf.toString('ascii', at, at + 4) !== 'data') at += 8 + buf.readUInt32LE(at + 4);
+    if (at + 8 > buf.length) return null;
+    const len = Math.min(buf.readUInt32LE(at + 4), buf.length - at - 8) >> 1, out = new Float32Array(len);
+    for (let i = 0; i < len; i++) out[i] = buf.readInt16LE(at + 8 + 2 * i) / 32768;
+    return out.length > SR ? out : null;
+  } catch { return null; } finally { try { fs.unlinkSync(file); } catch { /* never written */ } }
 }
 
 // ---- The test copy of the app ----

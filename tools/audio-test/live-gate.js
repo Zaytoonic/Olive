@@ -5,8 +5,9 @@
 // - It uses the mic your Olive uses (read from its settings, never written).
 // - Its window shows what to do: stay quiet, talk normally, stay quiet. About 2 minutes.
 // Both rules run on the same frames, so the only difference between them is the rule:
-//   old: open while the voice probability is 0.8 or more (held 300 ms)
-//   new: open at 0.8, then stay open while it's 0.5 or more (held 300 ms)
+//   Olive's rule: open while the voice probability is 0.8 or more (held 300 ms)
+//   hold variant: open at 0.8, then stay open while it's 0.5 or more (tried 2026-11-11 and not adopted: on a real voice it
+//   kept 0.8% more speech and was open twice as often in quiet). Change keep below to try another variant.
 const { spawn, execFileSync } = require('child_process'), fs = require('fs'), path = require('path');
 
 const root = path.join(__dirname, '..', '..');
@@ -135,7 +136,7 @@ function report(frames, mic) {
     let cuts = 0;                                          // closed while you were still talking: speech in the next 300 ms
     for (const i of talkAt) if (open[i - 1] && !open[i]) { let n = 0; for (let k = i; k < i + 30 && k < frames.length; k++) if (dB(frames[k][2]) > loud) n++; if (n >= 10) cuts++; }
     const shut = ph => { const at = frames.map((f, i) => f[0] === idx(ph) ? i : -1).filter(i => i >= 0); return pct(at.filter(i => open[i]).length, at.length); };
-    lines.push(`${name === 'old' ? 'Old rule (0.8 only)     ' : 'New rule (0.8, keep 0.5)'}  speech kept: ${kept(voiced)} (first 30 s ${kept(early)}, after ${kept(late)})  ·  cut mid-speech: ${cuts}x  ·  open in quiet: ${shut('quiet')} before, ${shut('quiet2')} after`);
+    lines.push(`${name === 'old' ? "Olive's rule (0.8)       " : 'Hold variant (keep 0.5)  '}  speech kept: ${kept(voiced)} (first 30 s ${kept(early)}, after ${kept(late)})  ·  cut mid-speech: ${cuts}x  ·  open in quiet: ${shut('quiet')} before, ${shut('quiet2')} after`);
   }
   return lines.join('\n');
 }
