@@ -172,6 +172,48 @@ function voiceChecks() {
     const { pct, silent } = openPct(runVoice(src, 100, 1), runVoice(src, 100, 0));
     check(`gate stays shut on ${name}`, pct <= limit, `open ${f1(pct)}% (limit ${limit}%)${silent ? `, of the ${f1(100 - silent)}% of the time noise reduction left anything` : ''}`);
   }
+  // A long run, the way Olive runs all day: the gate must keep letting real speech through after minutes, not just at the start.
+  // Real speech here is Windows' own speech voice. The fixture's synthetic speech is no stand-in for this: after a minute
+  // the network scores it near 0.64 and turns it down about 12 dB, while a real voice (checked live with
+  // npm run test:gate-live) and Windows speech keep scoring above 0.8.
+  const tts = windowsSpeech();
+  if (!tts) { console.log("  SKIP  speech still opens the gate after 2 minutes: Windows' speech voice isn't available"); return; }
+  const fe = []; for (let i = 0; i + 480 <= tts.length; i += 480) { let e = 0; for (let k = 0; k < 480; k++) e += tts[i + k] ** 2; fe.push(e); }
+  const top = Math.max(...fe), word = fe.map(e => toDb(e) > toDb(top) - 25);   // frames with a word in them, not the pauses
+  let we = 0, wn = 0; fe.forEach((e, j) => { if (word[j]) { we += e; wn += 480; } });
+  const gain = Math.pow(10, -25 / 20) / Math.sqrt(we / wn);                    // words at -25 dB, a normal talking level
+  const total = SR * 150, x = makeNoise(total), said = new Uint8Array(Math.ceil(total / 480));
+  for (let pos = 3 * SR; pos < total; pos += tts.length + 3 * SR) {             // 3 s of room noise between sentences
+    for (let i = 0; i < tts.length && pos + i < total; i++) x[pos + i] += tts[i] * gain;
+    word.forEach((w, j) => { const fr = Math.floor(pos / 480) + j; if (w && fr < said.length) said[fr] = 1; });
+  }
+  const p = loadVoice(), prm = { strength: new Float32Array([100]), gate: new Float32Array([1]) };
+  let heard = 0, kept = 0;
+  for (let i = 0; i + 128 <= total; i += 128) {
+    p.process([[x.subarray(i, i + 128)]], [[new Float32Array(128)]], prm);
+    if (i >= SR * 120 && said[Math.floor(i / 480)]) { heard++; if (p.open) kept++; }   // scored in the last 30 s only
+  }
+  check('speech still opens the gate after 2 minutes', heard > 0 && kept / heard >= 0.9, `${f1(100 * kept / Math.max(1, heard))}% of the words in the last 30 s let through (at least 90%)`);
+}
+// A few sentences from Windows' built-in speech voice, 48 kHz mono, or null if it isn't there.
+function windowsSpeech() {
+  const file = path.join(os.tmpdir(), `olive-audio-test-speech-${process.pid}.wav`);
+  const text = 'Hey, can you hear me alright? I think the game is about to start, so give me one second. ' +
+    'Okay, I am back. Let us push the left side together and wait for the others before we go in. ' +
+    'That was close. Nice work everyone, we should try that again next round.';
+  const ps = `Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; ` +
+    `$f = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(48000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono); ` +
+    `$s.SetOutputToWaveFile('${file}', $f); $s.Speak('${text.replace(/'/g, "''")}'); $s.Dispose()`;
+  try {
+    execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore', timeout: 60000 });
+    const buf = fs.readFileSync(file);
+    let at = 12;                                         // walk the chunks to the audio data
+    while (at + 8 <= buf.length && buf.toString('ascii', at, at + 4) !== 'data') at += 8 + buf.readUInt32LE(at + 4);
+    if (at + 8 > buf.length) return null;
+    const len = Math.min(buf.readUInt32LE(at + 4), buf.length - at - 8) >> 1, out = new Float32Array(len);
+    for (let i = 0; i < len; i++) out[i] = buf.readInt16LE(at + 8 + 2 * i) / 32768;
+    return out.length > SR ? out : null;
+  } catch { return null; } finally { try { fs.unlinkSync(file); } catch { /* never written */ } }
 }
 
 // ---- The test copy of the app ----
@@ -373,7 +415,7 @@ function analyseGate(cap, fixture) {
 }
 
 const ONLY = process.argv[2];
-const wanted = part => !ONLY || ONLY === part;
+const wanted = part => !ONLY || ONLY.split(',').includes(part);   // one part, or several: nr,gate
 
 async function liveChecks(profile, wav, fixture) {
   console.log('\nThe app, on a fake mic');
@@ -387,6 +429,24 @@ async function liveChecks(profile, wav, fixture) {
     check('mic is captured raw', info.suppression === false, `Chromium noise suppression reports ${info.suppression}`);
     check('the voice engine is running', info.engine === true, `voice engine active: ${info.engine}`);
     check('nothing reaches the real cable', info.sendConnected === false, `send chain connected: ${info.sendConnected}`);
+
+    if (wanted('gate')) {
+      // Right after start, before the other parts: once the network has run a minute it treats the test file's synthetic
+      // speech as noise and turns it down about 12 dB (real speech it leaves alone: Windows TTS speech loses 0.5 dB either way).
+      // The gate's long-running behaviour is checked offline instead ("speech still opens the gate after ...").
+      console.log('\nWhole chain, 30 s of noise and speech: noise reduction 100%, compressor on');
+      await copy.call(s => { state.nr = true; state.nrAmount = s; applyNr(); }, 100);
+      await sleep(7000);                 // the gate's noise floor has a 6 s memory
+      const cap = await copy.call(pageCapture, 30);
+      check('the audio clock keeps up after an output device was chosen', cap.n >= 30 * cap.sr * 0.98, `${cap.n} of ${30 * cap.sr} samples in 30 s`);
+      const g = analyseGate(cap, fixture);
+      const placed = Math.abs(g.micNoise - NOISE_DB) < 3 && g.voice[-25].mic > g.voice[-35].mic + 5 && g.voice[-35].mic > g.voice[-42].mic + 2;
+      check('capture lines up with the test file', placed, `mic levels: noise ${f1(g.micNoise)}, speech ${[-25, -35, -42].map(l => f1(g.voice[l].mic)).join(' / ')} dB`);
+      console.log(`        noise going in ${f1(g.micNoise)} dB, coming out ${f1(g.noise.endLevel)} dB`);
+      check('gate shuts on noise', g.noise.openPct <= 30, `open ${f1(g.noise.openPct)}% of ${f1(g.noise.seconds)} s, ${g.noise.flips} flips`);
+      check('speech reaches the end of the chain', g.voice[-25].openPct >= 80 && g.voice[-25].endLevel > g.micNoise + 10, `open ${f1(g.voice[-25].openPct)}%, output ${f1(g.voice[-25].endLevel)} dB`);
+      check('output does not clip', g.peakDb < -0.5, `peak ${f1(g.peakDb)} dB`);
+    }
 
     if (wanted('app')) {
       console.log('\nA new install');
@@ -730,21 +790,6 @@ async function liveChecks(profile, wav, fixture) {
       const r = await copy.call(pageNrLevels, s), drop = r.raw - r.out;
       check(`${s}% lowers steady noise by ${min}-${max} dB`, drop >= min && drop <= max && (!drops.length || drop > drops[drops.length - 1]), `measured ${f1(drop)} dB (${f1(r.raw)} -> ${f1(r.out)})`);
       drops.push(drop);
-    }
-
-    if (wanted('gate')) {
-      console.log('\nWhole chain, 30 s of noise and speech: noise reduction 100%, compressor on');
-      await copy.call(s => { state.nr = true; state.nrAmount = s; applyNr(); }, 100);
-      await sleep(7000);                 // the gate's noise floor has a 6 s memory
-      const cap = await copy.call(pageCapture, 30);
-      check('the audio clock keeps up after an output device was chosen', cap.n >= 30 * cap.sr * 0.98, `${cap.n} of ${30 * cap.sr} samples in 30 s`);
-      const g = analyseGate(cap, fixture);
-      const placed = Math.abs(g.micNoise - NOISE_DB) < 3 && g.voice[-25].mic > g.voice[-35].mic + 5 && g.voice[-35].mic > g.voice[-42].mic + 2;
-      check('capture lines up with the test file', placed, `mic levels: noise ${f1(g.micNoise)}, speech ${[-25, -35, -42].map(l => f1(g.voice[l].mic)).join(' / ')} dB`);
-      console.log(`        noise going in ${f1(g.micNoise)} dB, coming out ${f1(g.noise.endLevel)} dB`);
-      check('gate shuts on noise', g.noise.openPct <= 30, `open ${f1(g.noise.openPct)}% of ${f1(g.noise.seconds)} s, ${g.noise.flips} flips`);
-      check('speech reaches the end of the chain', g.voice[-25].openPct >= 80 && g.voice[-25].endLevel > g.micNoise + 10, `open ${f1(g.voice[-25].openPct)}%, output ${f1(g.voice[-25].endLevel)} dB`);
-      check('output does not clip', g.peakDb < -0.5, `peak ${f1(g.peakDb)} dB`);
     }
 
     if (wanted('mute')) {

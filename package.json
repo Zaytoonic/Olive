@@ -9,6 +9,7 @@
     "start": "electron .",
     "build:ui": "vite build",
     "preview": "vite build && node tools/preview.js",
+    "test:gate-live": "node tools/audio-test/live-gate.js",
     "build": "node tools/build.js",
     "patch-exe": "node tools/patch-exe.js",
     "make-icons": "node tools/make-icons.js",
