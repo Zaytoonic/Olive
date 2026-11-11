@@ -13,7 +13,7 @@
 ## Features
 <img src="docs/settings.png" align="right" width="300" alt="The Settings panel">
 
-- **Voice cleanup:** RNNoise noise reduction with adjustable strength, and a noise gate that opens on your voice.
+- **Voice cleanup:** RNNoise noise reduction (the 2025 model) with adjustable strength, and a noise gate that opens only when it hears your voice.
 - **Compressor** to even out your volume.
 - **Six-band EQ** with a low cut and presets, saved separately for each mic, and a hold-to-compare button.
 - **Send to Discord or other apps** through [VB-Audio Virtual Cable](https://vb-audio.com/Cable/).
@@ -25,6 +25,13 @@
 - **Settings** you set once (hotkeys, push to talk, mute sounds, the badge, updates) live behind the gear, out of the way. A dot on the gear tells you when something there needs you.
 
 <br clear="right">
+
+## What's new in 1.7.0
+- A rebuilt window, with new switches, sliders, dropdowns and buttons. Everything is where it was.
+- After you plug in or remove a device, or press refresh, Olive keeps looking for your mic for a minute.
+- Since 1.6.4: noise reduction uses RNNoise's 2025 model, and the noise gate waits for more confident voice detection.
+
+Every release is listed in the [changelog](CHANGELOG.md).
 
 ## Installing
 Download `Olive-Setup-<version>.exe` from [Releases](https://github.com/Zaytoonic/Olive/releases/latest) and run it. It installs for your Windows account, with no admin rights needed, and adds a Start menu shortcut and an uninstaller. The app is not code-signed yet, so Windows may say "Windows protected your PC": click **More info**, then **Run anyway**.
@@ -84,6 +91,7 @@ src/renderer/    what the window page loads
   vendor/          RNNoise (xiph, Feb 2025 model) compiled to WebAssembly, from @shiguredo/rnnoise-wasm 2025.1.5
 assets/          icons and mute sounds, both made from code (tools/make-icons.js, tools/make-sounds.js)
 docs/            the screenshots above
+CHANGELOG.md     what changed in each release
 tools/           build, packaging, signing, icon and sound scripts
   audio-test/      npm run test:audio
   installer/       the installer and uninstaller source, and npm run test:installer
