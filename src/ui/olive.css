@@ -1,0 +1,236 @@
+/* Olive on HeroUI v3: HeroUI's components, themed with Olive's palette (DESIGN.md).
+   Graphics acceleration is off in Olive (it saves memory), so everything here avoids blur, big shadows and
+   endless animations: those are drawn by the CPU. The meters only move with transforms. */
+/* Only the parts of HeroUI that Olive uses, in HeroUI's own order (its full stylesheet is ~470 KB). */
+@layer theme, base, components, utilities;
+@import "tailwindcss" source(none);
+@import "@heroui/styles/base" layer(base);
+@import "@heroui/styles/base/scrollbar.css" layer(base);
+@import "@heroui/styles/components/close-button.css" layer(components);
+@import "@heroui/styles/components/description.css" layer(components);
+@import "@heroui/styles/components/label.css" layer(components);
+@import "@heroui/styles/components/button.css" layer(components);
+@import "@heroui/styles/components/toggle-button.css" layer(components);
+@import "@heroui/styles/components/list-box-item.css" layer(components);
+@import "@heroui/styles/components/list-box.css" layer(components);
+@import "@heroui/styles/components/slider.css" layer(components);
+@import "@heroui/styles/components/switch.css" layer(components);
+@import "@heroui/styles/components/card.css" layer(components);
+@import "@heroui/styles/components/drawer.css" layer(components);
+@import "@heroui/styles/components/popover.css" layer(components);
+@import "@heroui/styles/components/select.css" layer(components);
+@import "@heroui/styles/themes/default" layer(theme);
+@import "@heroui/styles/utilities";
+@import "@heroui/styles/variants";
+@source "./";
+
+:root, :root[data-theme='dark'], .dark {
+  color-scheme: dark;
+  /* Olive's palette */
+  --olive: #6B7F3A;
+  --olive-light: #9AAF5E;
+  --canvas: #000000;
+  --tile: #2b2a27;
+  --hairline: #3a3935;
+  --text-2: #9c9a91;
+  --meter-green: #30d158; --meter-yellow: #ffd60a; --meter-red: #ff453a; --gate-orange: #ff9f0a;
+
+  /* HeroUI's semantic colours, set from it */
+  --background: var(--canvas);
+  --foreground: #f5f4f0;
+  --surface: #1d1c1a;
+  --surface-foreground: var(--foreground);
+  --surface-secondary: #2b2a27;
+  --surface-secondary-foreground: var(--foreground);
+  --surface-tertiary: #33322e;
+  --surface-tertiary-foreground: var(--foreground);
+  --overlay: #242320;
+  --overlay-foreground: var(--foreground);
+  --muted: var(--text-2);
+  --default: #2b2a27;
+  --default-foreground: var(--foreground);
+  --field-background: #2b2a27;
+  --field-foreground: var(--foreground);
+  --field-placeholder: var(--text-2);
+  --accent: var(--olive);
+  --accent-foreground: #ffffff;
+  --success: #30d158;
+  --success-foreground: #0b0b0a;
+  --warning: #ffd60a;
+  --warning-foreground: #0b0b0a;
+  --danger: #ff453a;
+  --danger-foreground: #ffffff;
+  --segment: #3a3935;
+  --segment-foreground: var(--foreground);
+  --border: var(--hairline);
+  --separator: var(--hairline);
+  --focus: var(--olive-light);
+  --link: var(--olive-light);
+  --backdrop: rgba(0, 0, 0, 0.55);
+  --surface-shadow: 0 0 0 0 transparent inset;
+  --overlay-shadow: 0 0 0 1px var(--hairline) inset, 0 8px 24px rgba(0, 0, 0, 0.5);
+  --field-shadow: 0 0 0 0 transparent inset;
+  --scrollbar-thumb: #3a3935;
+  --radius: 0.75rem;
+  --font-sans: 'SF Pro', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--canvas); color: var(--foreground);
+  font: 400 15px/1.4 var(--font-sans);
+  -webkit-font-smoothing: antialiased; user-select: none;
+}
+
+/* ---- Layout ---- */
+.olive-app { display: flex; flex-direction: column; height: 100%; }
+.olive-toolbar {
+  display: flex; align-items: center; gap: 10px; flex: none;
+  padding: 6px 10px 6px 16px; min-height: 52px;
+  background: var(--surface); border-bottom: 1px solid var(--hairline);
+}
+.olive-toolbar h1 { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+.olive-logo { width: 26px; height: 26px; border-radius: 7px; flex: none; }
+.olive-gear { margin-left: auto; position: relative; }
+.olive-dot { position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--warning); box-shadow: 0 0 0 2px var(--surface); }
+/* The scroll area fills the window, so the scrollbar sits at its edge; the content is a centred column. */
+.olive-main { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--hairline) transparent; }
+.olive-column { max-width: 1240px; margin: 0 auto; padding: 16px; container-type: inline-size; display: flex; flex-direction: column; gap: 14px; }
+.olive-columns { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.olive-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+@container (min-width: 780px) { .olive-columns { grid-template-columns: 1fr 1fr; align-items: start; } }
+
+.olive-section-title { font-size: 13px; font-weight: 600; color: var(--text-2); margin: 0 0 6px 4px; letter-spacing: 0.01em; }
+.olive-card { background: var(--surface); border-radius: 14px; box-shadow: none; }
+.olive-card-body { padding: 4px 16px; display: flex; flex-direction: column; }
+.olive-group { background: var(--surface); border-radius: 14px; padding: 4px 16px; margin-bottom: 16px; display: flex; flex-direction: column; }
+
+/* ---- Rows ---- */
+.olive-row { padding: 12px 0; display: flex; flex-direction: column; gap: 8px; }
+/* A hairline between the rows of a card or group. */
+.olive-card-body > * + *, .olive-group > * + * { border-top: 1px solid var(--hairline); }
+.olive-row-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; }
+.olive-row-text { min-width: 0; }
+.olive-row-title { font-size: 15px; font-weight: 500; color: var(--foreground); }
+.olive-row-end { display: flex; align-items: center; gap: 10px; flex: none; }
+.olive-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 13px; color: var(--text-2); }
+.olive-hint { margin: 0; font-size: 13px; color: var(--text-2); line-height: 1.35; }
+.olive-hint[data-tone='notice'] { color: var(--warning); }
+.olive-hint[data-tone='warn'] { color: var(--warning); }
+.olive-hint[data-tone='on'] { color: var(--olive-light); }
+.olive-caption { font-size: 12px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.06em; }
+.olive-icon { display: inline-grid; place-items: center; width: 20px; height: 20px; }
+.olive-icon svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.olive-icon.small { width: 16px; height: 16px; }
+.olive-icon .fill { fill: currentColor; stroke: none; }
+
+/* Sliders: Olive fill, a little thinner than HeroUI's default. */
+.olive-slider { width: 100%; }
+.olive-slider [data-slot='slider-fill'], .olive-slider .slider__fill { background: var(--olive); }
+
+/* ---- The microphone card ---- */
+.olive-hero-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.olive-current { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.olive-current-text { display: flex; flex-direction: column; gap: 6px; min-width: 260px; flex: 1; }
+.olive-mic-pick { display: flex; align-items: center; gap: 6px; max-width: 560px; }
+.olive-mic-select { flex: 1; min-width: 0; }
+.olive-mic-select [data-slot='select-value'], .olive-mic-select .select__value { font-size: 17px; font-weight: 600; }
+.olive-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.olive-pill { border-radius: 9999px; min-width: 92px; }
+.olive-pill[data-phase='recording'] { background: var(--danger); color: var(--danger-foreground); }
+.olive-pill[data-phase='playing'] { background: var(--olive); color: #fff; }
+.olive-listen[data-selected='true'], .olive-listen[aria-pressed='true'] { background: var(--olive); color: #fff; }
+.olive-mute { gap: 6px; }
+.olive-hero[data-muted] { box-shadow: 0 0 0 1px rgba(255, 69, 58, 0.45) inset; }
+.olive-muted-banner {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px;
+  background: rgba(255, 69, 58, 0.14); color: #ff8a80; font-weight: 500; font-size: 14px;
+}
+
+/* Input level meter: the colours are fixed and a cover slides over them (transform only). */
+.olive-meter-block { display: flex; flex-direction: column; gap: 6px; }
+.olive-meter-title { display: inline-flex; align-items: center; gap: 8px; }
+/* contain: repaints of the moving parts stay inside the bar (Olive paints on the CPU). */
+.olive-meter { position: relative; height: 14px; border-radius: 7px; overflow: hidden; background: var(--tile); contain: strict; }
+.olive-meter-fill { position: absolute; inset: 0; background: linear-gradient(90deg, var(--meter-green) 0%, var(--meter-green) 66%, var(--meter-yellow) 83%, var(--meter-red) 100%); }
+.olive-meter-cover { position: absolute; inset: 0; background: var(--tile); transform-origin: right center; transform: scaleX(1); will-change: transform; }
+/* The peak element spans the bar, so translateX(%) moves it by a share of the bar; its ::before is the line. */
+.olive-meter-peak { position: absolute; inset: 0; transform: translateX(0); will-change: transform; pointer-events: none; }
+.olive-meter-peak::before { content: ''; position: absolute; top: 0; bottom: 0; left: -2px; width: 2px; background: #fff; opacity: 0.85; }
+.olive-meter[data-muted] .olive-meter-fill { filter: grayscale(1) brightness(0.55); }
+.olive-gate-mark { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--gate-orange); border-radius: 1px; }
+.olive-scale { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; color: var(--text-2); }
+.olive-gate-chip { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 9999px; }
+.olive-gate-chip[data-state='none'] { display: none; }
+.olive-gate-chip[data-state='open'] { background: rgba(48, 209, 88, 0.16); color: var(--meter-green); }
+.olive-gate-chip[data-state='closed'] { background: var(--tile); color: var(--text-2); }
+.olive-chip-toggle { min-width: 0; height: 26px; padding: 0 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+.olive-chip-toggle[data-selected='true'] { background: var(--olive); color: #fff; }
+
+/* Send level */
+.olive-send-level { display: flex; align-items: center; gap: 10px; }
+.olive-mini-meter { position: relative; flex: 1; max-width: 220px; height: 6px; border-radius: 3px; overflow: hidden; background: var(--tile); contain: strict; }
+.olive-mini-fill { position: absolute; inset: 0; background: linear-gradient(90deg, var(--meter-green) 0 66%, var(--meter-yellow) 66% 83%, var(--meter-red) 83%); }
+.olive-mini-cover { position: absolute; inset: 0; background: var(--tile); transform-origin: right center; transform: scaleX(1); will-change: transform; }
+
+/* ---- Setup card ---- */
+.olive-setup { border: 1px solid var(--olive); }
+.olive-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; }
+.olive-steps li { display: list-item; padding-left: 4px; }
+.olive-steps li > * + * { margin-top: 6px; }
+.olive-steps li > .button { display: inline-flex; }
+.olive-setup-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ---- Equalizer ---- */
+.olive-eq { padding: 10px 0; }
+.olive-eq-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.olive-eq-summary { display: flex; align-items: center; gap: 8px; background: none; border: 0; padding: 4px 0; cursor: pointer; color: inherit; text-align: left; font: inherit; }
+.olive-eq-summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 6px; }
+.olive-chevron { color: var(--text-2); transition: transform 0.15s ease; }
+.olive-eq-summary[aria-expanded='true'] .olive-chevron { transform: rotate(90deg); }
+.olive-eq-title { display: flex; flex-direction: column; gap: 2px; }
+.olive-eq-head { display: flex; align-items: center; gap: 10px; }
+.olive-preset { width: 200px; }
+.olive-eq[data-off] .olive-eq-canvas { opacity: 0.45; }
+.olive-eq-body { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; }
+.olive-eq-canvas { width: 100%; height: 220px; background: #141412; border-radius: 10px; display: block; touch-action: none; }
+.olive-eq-canvas.grab { cursor: grab; }
+.olive-eq-canvas.grabbing { cursor: grabbing; }
+.olive-eq-canvas:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.olive-eq-tools { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.olive-eq-chips { display: flex; gap: 6px; }
+.olive-eq-chip {
+  width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer;
+  background: var(--band); color: #000; font: 600 12px var(--font-sans);
+}
+.olive-eq-chip[aria-selected='true'] { border-color: #fff; }
+.olive-eq-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.olive-eq-readout { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-2); flex-wrap: wrap; min-height: 32px; }
+.olive-eq-readout b { color: var(--foreground); font-weight: 600; }
+.olive-eq-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.olive-lowcut { font-size: 13px; color: var(--text-2); }
+
+/* ---- Settings drawer ---- */
+.olive-drawer-dialog { background: var(--canvas); width: min(440px, 100vw); }
+.olive-drawer-body { padding: 0 16px 16px; }
+.olive-about { text-align: center; color: var(--text-2); font-size: 13px; margin: 4px 0 0; }
+.olive-popover { min-width: var(--trigger-width); }
+
+/* Keep motion short and rare: no animation runs while nothing changes. */
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* ---- HeroUI adjustments ---- */
+.olive-card { padding: 0; gap: 0; }
+.button--secondary { --button-fg: var(--foreground); }
+.button--ghost { --button-fg: var(--text-2); }
+.button--ghost:hover { --button-fg: var(--foreground); }
+.olive-setup { padding: 16px; gap: 12px; }
+.olive-hint:empty { display: none; }
+[hidden] { display: none !important; }
+.olive-tip { display: inline-flex; }
+.olive-pick { min-width: 0; }
+.olive-mic-select { flex: 1; }
+/* Like the old window: numbered setup steps, and section titles as small capitals beside the card. */
+.olive-steps { list-style: decimal; }
+.olive-section-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 8px 16px; }

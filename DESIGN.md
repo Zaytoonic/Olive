@@ -1,6 +1,6 @@
 # Olive design
 
-Olive is named after Zaytoon, "olive" in Arabic. The brand is clean and premium: one dark look, in `src/renderer/styles.css`, built on clarity, deference and depth, with a single olive accent.
+Olive is named after Zaytoon, "olive" in Arabic. The brand is clean and premium: one dark look, in `src/ui/olive.css` (HeroUI's components themed with this palette), built on clarity, deference and depth, with a single olive accent.
 
 ## Palette
 | Token | Value | Use |

@@ -13,7 +13,7 @@ const stop = message => { console.error(message); process.exit(1); };
 
 if (!fs.existsSync(path.join(app, 'Olive.exe'))) stop('dist/Olive/Olive.exe not found. Run npm run update-runtime, npm run build and npm run patch-exe first.');
 if (!fs.existsSync(csc)) stop('The C# compiler in Windows was not found: ' + csc);
-for (const f of ['src/main/main.js', 'src/renderer/renderer.js', 'src/renderer/index.html', 'package.json']) {
+for (const f of ['src/main/main.js', 'src/renderer/audio-engine.js', 'src/renderer/ui/olive.js', 'src/renderer/index.html', 'package.json']) {
   const built = path.join(app, 'resources', 'app', f);
   if (f === 'package.json') {
     if (!fs.existsSync(built) || JSON.parse(fs.readFileSync(built, 'utf8')).version !== pkg.version) stop('dist/Olive is not this version. Run npm run build and npm run patch-exe first.');

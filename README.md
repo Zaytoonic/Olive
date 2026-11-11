@@ -46,7 +46,7 @@ npm run patch-exe
 ```
 The app is then at `dist\Olive\Olive.exe`. Keep it in its folder. Closing the window hides it to the tray; to quit, right-click the tray icon.
 
-To run it from source instead, use `npm start`.
+To run it from source instead, use `npm start`. To try a change next to your installed Olive, use `npm run preview`: it opens a separate copy with your settings and Send to Discord off, so Discord never hears you twice.
 
 To build the installer, run `npm run installer`, which creates `dist\Olive-Setup-<version>.exe`. `npm run test:installer` tests it end to end, including an update from inside Olive, kept apart from your real install. To code-sign it, see the top of `tools/sign.js`.
 
@@ -68,8 +68,13 @@ src/main/        Electron main process
   sysmic-client.js runs the Windows audio helper and talks to it
   win-audio.cs     Windows Core Audio helper: list mics, set volume and mute, report the ASUS mic key
   win-audio.ps1    runs that helper through PowerShell if win-audio.exe is missing
-src/renderer/    the window
-  index.html, styles.css, renderer.js   the window: controls, meters, settings
+src/ui/          the window, in React with HeroUI v3 (npm run build:ui builds it into src/renderer/ui)
+  store.js         everything the window does: settings, Windows mic control, hotkeys, push to talk, updates
+  App.jsx, Settings.jsx, Equalizer.jsx, bits.jsx   the components
+  eq-model.js, eq-graph.js   the EQ's bands and its canvas graph
+  olive.css        Olive's palette on HeroUI's theme, and the meters
+src/renderer/    what the window page loads
+  index.html       loads the audio engine, then the window (ui/, built from src/ui)
   audio-engine.js  the audio chain: mic capture, noise reduction, EQ, gate, compressor, Listen and the cable. It never touches the page, so a new window can drive it the same way
   badge.html, badge.css  the Muted badge
   voice-worklet.js noise reduction (RNNoise) and the voice gate

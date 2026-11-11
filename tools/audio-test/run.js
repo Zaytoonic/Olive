@@ -393,14 +393,15 @@ async function liveChecks(profile, wav, fixture) {
       const fresh = await copy.call(() => ({ gains: EQ_BANDS.map(d => eq.b[d.key].g), preset: $('eqPreset').value, comp: state.comp }));
       check('a new install starts flat, with the compressor off', fresh.gains.every(g => g === 0) && fresh.preset === 'flat' && fresh.comp === false, `gains ${fresh.gains.join()}, preset ${fresh.preset}, compressor ${fresh.comp}`);
       console.log('\nStart with Windows');
-      const startup = await copy.call(async () => ({ api: await window.appStartup.get(), disabled: $('startupToggle').disabled, hint: $('startupHint').textContent }));
+      const startup = await copy.call(async () => { await openSettings(); const r = { api: await window.appStartup.get(), disabled: $('startupToggle').disabled, hint: $('startupHint').textContent }; await closeSettings(); return r; });
       check('a copy run from source cannot register itself at login', startup.api.supported === false && startup.disabled, `toggle disabled: ${startup.disabled}, hint: "${startup.hint}"`);
       console.log('\nChoosing a mic');
       const mic = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), [a, b] = devices, out = {};
         const startBands = snapshotEq();
         const realList = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
-        out.names = [a.name, b.name]; out.options = $('micSelect').options.length;
+        const micOptions = () => [...$('micSelect').options].filter(o => o.value).length;
+        out.names = [a.name, b.name]; out.options = micOptions();
         $('micSelect').value = b.id; $('micSelect').dispatchEvent(new Event('change', { bubbles: true })); await wait(500);
         out.picked = state.deviceId === b.id && prefDeviceName === b.name;
         out.firstTimeInherits = eq.b.bass.g === startBands.bands.bass.g;   // this mic has no EQ of its own yet
@@ -419,15 +420,15 @@ async function liveChecks(profile, wav, fixture) {
         delete navigator.mediaDevices.enumerateDevices;
         await loadDevices(); await wait(800);
         out.replugged = { current: currentDevice().name, notice: $('micNotice').textContent, bass: eq.b.bass.g, capturing: engine.capturedId === state.deviceId };
-        const pickBox = $('micSelect').getBoundingClientRect(), refreshBox = $('refreshBtn').getBoundingClientRect(), optionsBefore = $('micSelect').options.length;
+        const pickBox = document.querySelector('.olive-mic-select').getBoundingClientRect(), refreshBox = $('refreshBtn').getBoundingClientRect(), optionsBefore = micOptions();
         out.refreshBeside = refreshBox.width > 0 && refreshBox.left >= pickBox.right - 1 && Math.abs((refreshBox.top + refreshBox.bottom) - (pickBox.top + pickBox.bottom)) / 2 < 8;
         out.panelGone = !$('devicesPanel') && !$('deviceList') && !$('devToggle');
         navigator.mediaDevices.enumerateDevices = async () => (await realList()).filter(d => d.deviceId !== state.deviceId);
         $('refreshBtn').click(); await wait(800);
-        out.refreshRemoved = $('micSelect').options.length === optionsBefore - 1;
+        out.refreshRemoved = micOptions() === optionsBefore - 1;
         delete navigator.mediaDevices.enumerateDevices;
         $('refreshBtn').click(); await wait(800);
-        out.refreshRestored = $('micSelect').options.length === optionsBefore;
+        out.refreshRestored = micOptions() === optionsBefore;
         const saved = JSON.parse((savePrefs(), localStorage.getItem(PREFS_KEY)));
         out.savedPerMic = [saved.eqByMic[a.name] && saved.eqByMic[a.name].bands.bass.g, saved.eqByMic[b.name] && saved.eqByMic[b.name].bands.bass.g];
         selectDevice(a.id); await wait(300);
@@ -441,42 +442,50 @@ async function liveChecks(profile, wav, fixture) {
       check('unplugged: falls back and says so', mic.unplugged.current === mic.names[0] && mic.unplugged.notice.includes(mic.names[1]) && mic.unplugged.bass === -4 && mic.unplugged.stillPreferred === mic.names[1], `using ${mic.unplugged.current}, "${mic.unplugged.notice}"`);
       check('plugged back in: returns to the preferred mic', mic.replugged.current === mic.names[1] && !mic.replugged.notice && mic.replugged.bass === 5 && mic.replugged.capturing, `using ${mic.replugged.current}, EQ bass ${mic.replugged.bass}`);
       console.log('\nAppearance');
-      const look = await copy.call(() => {
+      const look = await copy.call(async () => {
         savePrefs();
+        await openSettings();
+        const version = $('appVersion').textContent;
+        await closeSettings();
         return {
           picker: !!document.getElementById('themeSelect'), attr: document.documentElement.dataset.theme || null, text: getComputedStyle(document.body).color,
-          accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(), names: [document.title, document.querySelector('h1').textContent, $('appVersion').textContent.split(' ')[0]],
-          sheets: [...document.styleSheets].map(s => s.href.split('/').pop()), saved: 'theme' in JSON.parse(localStorage.getItem(PREFS_KEY))
+          accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(), names: [document.title, document.querySelector('h1').textContent, version.split(' ')[0]],
+          sheets: [...document.styleSheets].filter(s => s.href).map(s => s.href.split('/').pop()), saved: 'theme' in JSON.parse(localStorage.getItem(PREFS_KEY))
         };
       });
-      check('Classic is the only look, with no picker', !look.picker && !look.attr && !look.saved && look.text === 'rgb(245, 244, 240)' && look.sheets.join() === 'styles.css', `picker: ${look.picker}, stylesheets: ${look.sheets.join()}, text: ${look.text}`);
-      check('the window is branded Olive', look.accent === '#6B7F3A' && look.names.every(n => n === 'Olive'), `accent ${look.accent}, title / heading / settings: ${look.names.join(' / ')}`);
+      check('there is one look, with no picker', !look.picker && look.attr === 'dark' && !look.saved && look.text === 'rgb(245, 244, 240)' && look.sheets.join() === 'olive.css', `picker: ${look.picker}, stylesheets: ${look.sheets.join()}, text: ${look.text}`);
+      check('the window is branded Olive', look.accent.toUpperCase() === '#6B7F3A' && look.names.every(n => n === 'Olive'), `accent ${look.accent}, title / heading / settings: ${look.names.join(' / ')}`);
       console.log('\nSettings panel');
       const panel = await copy.call(async () => {
-        const wait = ms => new Promise(r => setTimeout(r, ms)), shown = () => getComputedStyle($('settingsPanel')).visibility === 'visible';
-        const out = { closedAtStart: !shown(), inPanel: ['muteKeyToggle', 'pttToggle', 'soundToggle', 'badgeToggle', 'updateAuto', 'startupToggle'].every(id => $('settingsPanel').contains($(id))) };
-        $('settingsBtn').click(); await wait(300);
-        out.opened = shown() && $('settingsBtn').getAttribute('aria-expanded') === 'true' && document.querySelector('main').inert;
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(300);
-        out.escCloses = !shown() && !document.querySelector('main').inert && document.activeElement === $('settingsBtn');
-        $('settingsBtn').click(); await wait(300);
-        $('settingsScrim').click(); await wait(300);
+        const wait = ms => new Promise(r => setTimeout(r, ms)), shown = () => !!$('settingsPanel');
+        const pageHidden = () => { const m = document.querySelector('main'); return m.inert || !!m.closest('[aria-hidden="true"], [inert]'); };
+        const out = { closedAtStart: !shown() };
+        $('settingsBtn').focus(); $('settingsBtn').click(); await wait(500);
+        out.inPanel = shown() && ['muteKeyToggle', 'pttToggle', 'soundToggle', 'badgeToggle', 'updateAuto', 'startupToggle'].every(id => $('settingsPanel').contains($(id)));
+        out.opened = shown() && $('settingsBtn').getAttribute('aria-expanded') === 'true' && pageHidden();
+        const inside = $('settingsPanel').contains(document.activeElement) ? document.activeElement : $('settingsPanel');   // a hidden window has no focus to follow
+        inside.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await wait(600);
+        out.escCloses = !shown() && !pageHidden();
+        out.focusBack = document.activeElement === $('settingsBtn');
+        $('settingsBtn').click(); await wait(500);
+        const bd = $('settingsScrim'), r = bd.getBoundingClientRect(), at = { clientX: r.left + 20, clientY: r.top + r.height / 2, bubbles: true, cancelable: true, composed: true, pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 1 };
+        bd.dispatchEvent(new PointerEvent('pointerdown', at)); bd.dispatchEvent(new PointerEvent('pointerup', { ...at, buttons: 0 })); bd.dispatchEvent(new MouseEvent('click', at)); await wait(600);
         out.scrimCloses = !shown();
-        const hint = $('muteKeyHint'), was = hint.textContent;
-        hint.textContent = 'Ctrl+Alt+M is already in use by another app'; await wait(50);
+        setView({ muteKeyHint: 'Ctrl+Alt+M is already in use by another app' }); await wait(50);
         out.dotOn = !$('settingsDot').hidden && /hotkey/.test($('settingsBtn').title);
-        hint.textContent = 'Ctrl+Alt+M mutes your mic from anywhere'; await wait(50);
+        setView({ muteKeyHint: 'Ctrl+Alt+M mutes your mic from anywhere' }); await wait(50);
         out.dotOff = $('settingsDot').hidden;
-        hint.textContent = was; await wait(50);
+        await applyMuteHotkey();
         return out;
       });
       check('one-time settings live in a panel behind the gear, closed at start', panel.closedAtStart && panel.inPanel, `closed: ${panel.closedAtStart}, all six settings inside: ${panel.inPanel}`);
-      check('it opens, and Esc or a click outside closes it', panel.opened && panel.escCloses && panel.scrimCloses, `opens: ${panel.opened}, Esc: ${panel.escCloses}, outside: ${panel.scrimCloses}`);
+      check('it opens, and Esc or a click outside closes it', panel.opened && panel.escCloses && panel.scrimCloses, `opens: ${panel.opened}, Esc: ${panel.escCloses} (focus back on the gear: ${panel.focusBack}), outside: ${panel.scrimCloses}`);
       check('a dot on the gear flags something that needs you', panel.dotOn && panel.dotOff, `hotkey taken: dot ${panel.dotOn}, cleared: ${panel.dotOff}`);
       console.log('\nNo microphone');
       const none = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), md = navigator.mediaDevices, realList = md.enumerateDevices.bind(md), out = {};
-        const read = () => ({ options: [...$('micSelect').options].map(o => o.textContent), disabled: $('micSelect').disabled, status: $('devStatus').textContent, level: $('levelDb').textContent, chip: $('gateChip').textContent, capturing: !!engine.stream });
+        const trigger = () => document.querySelector('.olive-mic-select button'), listed = () => [...$('micSelect').options].filter(o => o.value).map(o => o.textContent);
+        const read = () => ({ options: listed().length ? listed() : [document.querySelector('.olive-mic-select [data-slot="select-value"]').textContent], disabled: trigger().disabled || trigger().hasAttribute('data-disabled'), status: $('devStatus').textContent, level: $('levelDb').textContent, chip: $('gateChip').textContent, capturing: !!engine.stream });
         const fail = name => { md.getUserMedia = async () => { throw new DOMException('test', name); }; };
         try {
           md.enumerateDevices = async () => (await realList()).filter(d => d.kind !== 'audioinput');
@@ -574,13 +583,14 @@ async function liveChecks(profile, wav, fixture) {
         const out = {}, realFind = findCable, keepFresh = freshInstall, keepDone = state.setupDone;
         const shown = () => !$('setupCard').hidden;
         try {
-          findCable = async () => null; state.setupDone = false; freshInstall = false; await updateSetup();
+          const settle = () => new Promise(r => setTimeout(r, 60));   // React draws the change a moment later
+          findCable = async () => null; state.setupDone = false; freshInstall = false; await updateSetup(); await settle();
           out.noCable = { shown: shown(), text: $('setupCable').textContent, download: !$('setupDownload').hidden };
           $('setupDone').click(); await new Promise(r => setTimeout(r, 100));
           out.dismissed = { shown: shown(), reopen: !$('setupOpen').hidden, saved: JSON.parse(localStorage.getItem(PREFS_KEY)).setupDone };
-          findCable = async () => ({ deviceId: 'x' }); state.setupDone = false; freshInstall = true; await updateSetup();
+          findCable = async () => ({ deviceId: 'x' }); state.setupDone = false; freshInstall = true; await updateSetup(); await settle();
           out.freshWithCable = { shown: shown(), download: !$('setupDownload').hidden };
-          state.setupDone = false; freshInstall = false; await updateSetup();
+          state.setupDone = false; freshInstall = false; await updateSetup(); await settle();
           out.upgradeWithCable = { shown: shown(), done: state.setupDone };
         } finally { findCable = realFind; freshInstall = keepFresh; state.setupDone = keepDone; await updateSetup(); }
         return out;
@@ -739,7 +749,7 @@ async function liveChecks(profile, wav, fixture) {
 
     if (wanted('mute')) {
       console.log('\nMute');
-      await copy.call(() => { state.nr = true; state.nrAmount = 100; state.gateAuto = false; updateGate(); applyNr(); setMonitor(true); });
+      await copy.call(() => { state.nr = true; state.nrAmount = 100; state.gateAuto = false; updateGate(); applyNr(); setMonitor(true); return openSettings(); });
       await sleep(7000);
       const on = await copy.call(pageOutPeak, 14);       // longer than the file's 8 s without speech
       check('sound flows when unmuted', on > -50, `output peak ${f1(on)} dB`);
@@ -784,15 +794,19 @@ async function liveChecks(profile, wav, fixture) {
       // The sound settings, through the real controls
       const soundSet = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), fire = (el, type) => el.dispatchEvent(new Event(type, { bubbles: true }));
+        // React keeps its own copy of an input's value, so a value set from outside goes through the native setter.
+        const setValue = (el, v) => Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, String(v));
         const s = $('soundVol'), sw = $('soundToggle'), out = {};
-        s.value = 50; fire(s, 'input'); fire(s, 'change'); await wait(100);
+        // Set 50%, then nudge with the arrow keys and back: a key press is a release, like letting go after a drag.
+        const key = k => s.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+        setValue(s, 50); fire(s, 'input'); await wait(80); key('ArrowRight'); await wait(80); key('ArrowLeft'); await wait(100);
         out.volume = muteSound.volume; out.preview = !muteSound.paused; out.shown = $('soundVal').textContent;
-        sw.checked = false; fire(sw, 'change');
+        if (sw.checked) sw.click();
         toggleMute(); await wait(100); out.silent = muteSound.paused && unmuteSound.paused;
         toggleMute(); await wait(100); out.silent = out.silent && muteSound.paused && unmuteSound.paused;
         const saved = JSON.parse(localStorage.getItem(PREFS_KEY));
         out.saved = saved.muteSounds === false && saved.muteSoundVol === 50;
-        sw.checked = true; fire(sw, 'change'); s.value = 100; fire(s, 'input');
+        if (!sw.checked) sw.click(); setValue(s, 100); fire(s, 'input');
         return out;
       });
       check('the mute sounds have a volume that previews on release', Math.abs(soundSet.volume - 0.25) < 0.001 && soundSet.preview && soundSet.shown === '50%', `50% plays at ${soundSet.volume} (by loudness), preview: ${soundSet.preview}`);
@@ -800,7 +814,7 @@ async function liveChecks(profile, wav, fixture) {
       // The muted badge: its own window, read through its own page
       const badgeAt = () => evalIn(/badge\.html/, '({ vis: document.visibilityState, left: screenX - screen.availLeft, top: screenY - screen.availTop, right: screen.availLeft + screen.availWidth - screenX - outerWidth, bottom: screen.availTop + screen.availHeight - screenY - outerHeight })');
       const pick = corner => copy.call(c => { const p = $('badgeCorner'); p.value = c; p.dispatchEvent(new Event('change', { bubbles: true })); }, corner);
-      await copy.call(() => { state.badge = true; $('badgeToggle').checked = true; state.badgeCorner = 'top-left'; $('badgeCorner').value = 'top-left'; return window.appBadge.set(true, 'top-left', false); });
+      await copy.call(() => { if (!$('badgeToggle').checked) $('badgeToggle').click(); state.badgeCorner = 'top-left'; setView({}); return window.appBadge.set(true, 'top-left', false); });
       const before = await badgeAt();
       await copy.call(() => toggleMute()); await sleep(1500);
       const onMute = await badgeAt();
@@ -814,10 +828,10 @@ async function liveChecks(profile, wav, fixture) {
       const preview = await badgeAt(); await sleep(2700);
       const afterPreview = await badgeAt();
       check('choosing a corner shows it for a moment', preview.vis === 'visible' && preview.left <= 20 && afterPreview.vis === 'hidden', `${preview.vis}, then ${afterPreview.vis}`);
-      await copy.call(() => { const t = $('badgeToggle'); t.checked = false; t.dispatchEvent(new Event('change', { bubbles: true })); toggleMute(); });
+      await copy.call(() => { const t = $('badgeToggle'); if (t.checked) t.click(); toggleMute(); });
       await sleep(500);
       const badgeOff = await badgeAt();
-      await copy.call(() => { toggleMute(); const t = $('badgeToggle'); t.checked = true; t.dispatchEvent(new Event('change', { bubbles: true })); });
+      await copy.call(() => { toggleMute(); const t = $('badgeToggle'); if (!t.checked) t.click(); });
       check('no badge when it is turned off', badgeOff.vis === 'hidden', `muted with the badge off: ${badgeOff.vis}`);
       await sleep(2800);
       const hotkey = await copy.call(() => $('muteKeyHint').textContent);
@@ -855,7 +869,7 @@ async function liveChecks(profile, wav, fixture) {
         check('choosing is safe: Esc cancels, plain keys are refused', /Ctrl\+Alt\+M/.test(cancelled) && /Use Ctrl/.test(refused), `"${cancelled}" / "${refused}"`);
         await copy.call(() => { state.muteAccel = 'Control+Alt+M'; return applyMuteHotkey(); });
       }
-      await copy.call(() => setMonitor(false));
+      await copy.call(() => { setMonitor(false); return closeSettings(); });
       // The mic key: follow what ASUS did, always judged from before the press. Each row is [before, presses, default device now, expected].
       const keyRows = await copy.call(() => [[false, 1, true, true], [true, 1, false, false], [false, 1, false, true], [true, 1, true, false], [false, 2, false, false], [false, 2, true, true], [false, 1, null, true], [true, 2, null, true]].map(([b, p, d, want]) => ({ b, p, d, want, got: micKeyResult(b, p, d) })));
       check('mic key decisions', keyRows.every(r => r.got === r.want), keyRows.filter(r => r.got !== r.want).map(r => JSON.stringify(r)).join(' ') || `${keyRows.length} cases, including the background check arriving first`);
