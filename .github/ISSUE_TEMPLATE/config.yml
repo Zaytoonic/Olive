@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setting up Olive with Discord
+    url: https://github.com/Zaytoonic/Olive#using-it-with-discord
+    about: The three steps to send your cleaned-up mic to Discord.
