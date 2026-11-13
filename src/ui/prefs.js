@@ -2,7 +2,7 @@
 // Restored on start: mic, volume (in-app), gate, mono, noise reduction, monitor level, EQ, send.
 // Not restored on purpose: Listen (could cause feedback at launch) and Mute (Windows keeps its own).
 import { state, showNotice } from './core.js';
-import { loadEqPrefs, eqPrefs } from './store.js';
+import { loadEqPrefs, eqPrefs } from './eq.js';
 
 export const PREFS_KEY = 'olive.settings.v1';
 export const OLD_PREFS_KEY = 'micManager.settings.v1';   // the old name, from before the rebrand

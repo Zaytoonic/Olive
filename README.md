@@ -76,10 +76,13 @@ src/main/        Electron main process
   win-audio.cs     Windows Core Audio helper: list mics, set volume and mute, report the ASUS mic key
   win-audio.ps1    runs that helper through PowerShell if win-audio.exe is missing
 src/ui/          the window, in React with HeroUI v3 (npm run build:ui builds it into src/renderer/ui)
-  store.js         what the window does: mics, controls, meters, EQ, sending to the cable, Windows mic control, start-up
+  store.js         what the window does: mics, controls, capture, Windows mic control, where sounds play, the mic test, start-up
   core.js          the settings and view every part shares, and small helpers
   prefs.js         saving and loading your settings
   keys.js          the laptop's mic key, the mute hotkey and push to talk
+  meters.js        the level meters and the gate chip, drawn outside React
+  eq.js            the mic EQ: presets, each mic's own EQ, hold to compare
+  cable.js         sending to the virtual cable, and the first-run setup that looks for it
   app-settings.js  the Muted badge, updates and start with Windows
   test-bridge.js   handles for npm run test:audio
   App.jsx, Settings.jsx, Equalizer.jsx, bits.jsx   the components

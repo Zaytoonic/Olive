@@ -1,8 +1,10 @@
 // Keys that mute or talk: the laptop's mic key, the mute hotkey (also used by the tray), and push to talk.
 import { state, ui, cleanErr } from './core.js';
 import { savePrefs } from './prefs.js';
+import { resetGateChip } from './meters.js';
+import { updateSendStatus } from './cable.js';
 import {
-  toggleMute, setAllMuted, playMuteSound, syncTalking, updateSendStatus, resetGateChip,
+  toggleMute, setAllMuted, playMuteSound, syncTalking,
   sysApi, curSys, storeSys, applySysToUi, touchSys, live, sysStatus, sysEndpoints
 } from './store.js';
 
