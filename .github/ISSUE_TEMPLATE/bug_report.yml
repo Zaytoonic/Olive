@@ -1,0 +1,52 @@
+name: Something's not working
+description: Olive does something wrong, or stops working
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what Olive did instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can it be made to happen again?
+      description: The steps, if you know them. "It happens sometimes" is fine too.
+      placeholder: |
+        1. Open Olive
+        2. Turn on ...
+        3. ...
+  - type: input
+    id: version
+    attributes:
+      label: Olive version
+      description: At the bottom of Settings (the gear), e.g. 1.7.0.
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: e.g. Windows 11 24H2. Press Win+R and type winver to see it.
+    validations:
+      required: true
+  - type: input
+    id: mic
+    attributes:
+      label: Microphone
+      description: The kind of mic, e.g. "laptop mic", "USB headset", "XLR through an audio interface".
+  - type: dropdown
+    id: send
+    attributes:
+      label: Is "Send to Discord / other apps" on?
+      options:
+        - "Yes, with VB-Cable"
+        - "No"
+        - "Not sure"
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, which app you were sending to (Discord, OBS, ...), or anything that seems related.

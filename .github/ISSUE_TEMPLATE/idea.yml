@@ -1,0 +1,15 @@
+name: An idea
+description: Something Olive could do, or do better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like Olive to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why?
+      description: What you're trying to do, or what bothers you now.
