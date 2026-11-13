@@ -7,10 +7,12 @@ import { state, view, ui, getView } from './core.js';
 import { PREFS_KEY, OLD_PREFS_KEY, pref, savePrefs } from './prefs.js';
 import { onMicKey, micKeyResult, applyPtt, applyMuteHotkey, pttOpen } from './keys.js';
 import { checkUpdates, setSettingsOpen } from './app-settings.js';
+import { syncTicker, meterTestVars } from './meters.js';
+import { selectBand, setEqOpen, eqEdited, applyEq, eqTestHooks } from './eq.js';
+import { updateSetup, isCableLabel, cableTestVars } from './cable.js';
 import {
-  muteSound, unmuteSound, sysApi, toggleMute, setMonitor, setSendWanted, loadDevices, selectDevice, selectBand, setEqOpen,
-  eqEdited, applyEq, applyNr, updateGate, setMutedUi, updateSetup, loadOutputs, syncTicker, isCableLabel, currentDevice, updateHints,
-  testHooks
+  muteSound, unmuteSound, sysApi, toggleMute, setMonitor, setSendWanted, loadDevices, selectDevice,
+  applyNr, updateGate, setMutedUi, loadOutputs, currentDevice, updateHints, storeTestVars
 } from './store.js';
 
 const TEST_CONTROLS = {
@@ -25,11 +27,11 @@ const testGlobals = {
   state, eq, EQ_BANDS, PREFS_KEY, OLD_PREFS_KEY, muteSound, unmuteSound, sysApi, eqBandsReset, olive: null,
   toggleMute, setMonitor, savePrefs, loadDevices, selectDevice, selectBand, setEqOpen, eqEdited, applyEq, applyNr, updateGate, setMutedUi, onMicKey, micKeyResult,
   updateSetup, loadOutputs, syncTicker, applyPtt, applyMuteHotkey, checkUpdates, isCableLabel, currentDevice, updateHints,
-  restoreEq: testHooks.restoreEq,
+  restoreEq: eqTestHooks.restoreEq,
   snapshotEq: () => snapshotEq(view.eqPreset),
-  showEqPreset: testHooks.showEqPreset,
+  showEqPreset: eqTestHooks.showEqPreset,
   syncEqUi: () => applyEq(),
-  eqPoint: testHooks.eqPoint,
+  eqPoint: eqTestHooks.eqPoint,
   setView: p => ui(p),
   // The settings live in a drawer that only exists while open: these open it (resolving once it's on screen) and close it.
   openSettings: () => new Promise(resolve => {
@@ -47,7 +49,7 @@ const testGlobals = {
 testGlobals.olive = { state, getView, eq, toggleMute, setMonitor, setSendWanted, savePrefs, loadDevices, selectBand, setEqOpen, setSettingsOpen, PREFS_KEY };
 for (const [k, v] of Object.entries(testGlobals)) window[k] = v;
 const testVars = {
-  ...testHooks.vars,
+  ...storeTestVars, ...meterTestVars, ...cableTestVars,
   pttOpen: [() => pttOpen], prefDeviceName: [() => pref.deviceName],
   sendWanted: [() => pref.send, v => { pref.send = v; }]
 };

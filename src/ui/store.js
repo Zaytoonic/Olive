@@ -1,19 +1,27 @@
-// The window's main logic, without drawing anything: the mic list, the controls, the level meters, the EQ, capture,
-// sending to the virtual cable, Windows mic control, where sounds play, first-run setup, the mic test, and start().
+// The window's main logic, without drawing anything: the mic list, the controls, capture, Windows mic control,
+// where sounds play, the mic test, and start().
 // Other parts live beside it: core.js (settings, view, helpers), prefs.js (saving), keys.js (mic key, mute hotkey,
-// push to talk), app-settings.js (badge, updates, start with Windows) and test-bridge.js (for tools/audio-test).
-// Components import everything from here. The level meters skip React: setMeterEls() hands their elements to the
-// meter timer, which only touches transforms and text.
-import { EQ_PRESETS, EQ_BANDS, eq, resetBand, restoreEq, snapshotEq, applyPreset, eqBandsReset } from './eq-model.js';
-import { engine, MIN_DB, dbToPct, ampToDb, state, view, ui, setStatus, showNotice, cleanErr } from './core.js';
+// push to talk), meters.js (the level meters), eq.js (the mic EQ), cable.js (sending to the virtual cable, first-run
+// setup), app-settings.js (badge, updates, start with Windows) and test-bridge.js (for tools/audio-test).
+// Components import everything from here.
+import { EQ_BANDS, eq, eqBandsReset } from './eq-model.js';
+import { engine, dbToPct, state, view, ui, setStatus, showNotice, cleanErr } from './core.js';
 import { pref, loadPrefs, savePrefs, scheduleSave } from './prefs.js';
-import { hotkeyChoosing, pttChoosing, pttOpen, talking, talkFade, initMuteHotkey, initPtt } from './keys.js';
+import { hotkeyChoosing, pttChoosing, talking, talkFade, initMuteHotkey, initPtt } from './keys.js';
 import { initBadge, initUpdates, initStartup } from './app-settings.js';
+import { isHidden, resetLevel, syncTicker } from './meters.js';
+import { switchEqTo, presetShown } from './eq.js';
+import { isCableLabel, sendHint, updateSendStatus, setSend, setFreshInstall, updateSetup } from './cable.js';
 
 // What the components use from the other parts.
 export { dbToPct, state, getView, useView } from './core.js';
 export { PREFS_KEY, savePrefs } from './prefs.js';
 export { hotkeyLabel, setMuteHotkeyOn, startChoosingHotkey, setPtt, startChoosingPtt } from './keys.js';
+export { setMeterEls, resetGateChip, syncTicker } from './meters.js';
+export {
+  attachEqGraph, applyEq, eqEdited, eqEditEnd, selectBand, resetSelectedBand, choosePreset, setEqOn, setLowCut, setEqOpen, holdCompare
+} from './eq.js';
+export { isCableLabel, updateSendStatus, updateSetup, setupDownload, setupCheck, setupFinished, setupShow } from './cable.js';
 export { setBadge, setBadgeCorner, pressUpdate, openReleaseNotes, setUpdateAuto, setStartup, setSettingsOpen, settingsReasons } from './app-settings.js';
 
 export let devices = [];
@@ -35,7 +43,7 @@ export function selectDevice(id) {
   pref.deviceName = (devices.find(d => d.id === id) || {}).name || null;
   if (live) switchEqTo(pref.deviceName);
   savePrefs();
-  peak = MIN_DB; smoothed = MIN_DB;
+  resetLevel();
   renderDevices();
   applySysToUi();
   if (live) startCapture();
@@ -108,25 +116,16 @@ export function setMonitor(on) {
   engine.set({ monitor: on, monitorVol: state.monitorVol });
   updateHints();
 }
-// The meter's timer runs only while the window is showing. The audio needs none here: the engine runs its own backup gate.
-let tickTimer = null;
-export function syncTicker() {
-  const run = !isHidden();
-  if (run === !!tickTimer) return;
-  clearInterval(tickTimer);
-  tickTimer = null;
-  if (run) { last = performance.now(); tickTimer = setInterval(tick, 33); }
-}
 function applyMono() {
   ui({ monoHint: state.mono ? 'On: left and right mixed, heard in both ears' : 'Off: stereo mics keep left and right separate' });
   engine.set({ mono: state.mono });
 }
 // With Windows control the captured audio already has the Windows level applied, so the app adds no gain.
-const volFactor = () => (curSys() ? 1 : state.volume / 75);
+export const volFactor = () => (curSys() ? 1 : state.volume / 75);
 function updateVolumeGain() { engine.set({ inputGain: volFactor() }); }
 export function applyNr() { engine.set({ nr: state.nr, nrAmount: state.nrAmount }); }
 function applyComp() { engine.set({ comp: state.comp, compAmount: state.compAmount }); updateCompHint(); }
-function updateCompHint() {
+export function updateCompHint() {
   if (!state.comp) { ui({ compHint: 'Your volume goes out as-is' }); return; }
   const r = engine.compReduction();
   const text = r < -0.5 ? `Evening out ${(-r).toFixed(1)} dB` : 'Evens out your volume';
@@ -142,7 +141,7 @@ export function updateGate() {
   engine.set({ gateDb: state.gateDb, gateAuto: state.gateAuto });
   ui();
 }
-function refreshGateUi() {
+export function refreshGateUi() {
   const t = Math.round(gateDbNow()), st = engine.status();
   const byVoice = state.gateAuto && st.voiceGate;
   const label = byVoice ? 'Voice' : t + ' dB';   // the Auto chip beside it says whether it's automatic
@@ -164,121 +163,6 @@ export function updateHints() {
     ...(engine.micTest ? {} : { testDisabled: !engine.capturing })
   });
 }
-
-// ---- Level meters (outside React) ----
-let smoothed = MIN_DB, peak = MIN_DB, peakHold = 0, last = performance.now();
-let compTick = 0, windowHidden = false;
-const meter = {};
-let shownCover = '', shownPeak = '', shownDb = '', dbShownAt = 0, shownChip = null;
-let sendShown = MIN_DB, shownSendDb = '', shownSendCover = '';
-// Components hand over their meter elements: { cover, peak, levelDb, chip } and { sendCover, sendDb }.
-// Returns the function that takes them back.
-export function setMeterEls(els) {
-  Object.assign(meter, els);
-  shownCover = shownPeak = shownDb = shownSendDb = shownSendCover = ''; shownChip = null;
-  return () => { for (const k of Object.keys(els)) if (meter[k] === els[k]) meter[k] = null; };
-}
-// Hidden = minimized / in the tray. Electron tells us via preload (document.hidden can't, see main.js).
-const isHidden = () => windowHidden || document.hidden;
-if (window.appWindow) window.appWindow.onVisibility(v => { windowHidden = !v; if (v && eqGraph) eqGraph.draw(); syncTicker(); });
-document.addEventListener('visibilitychange', () => syncTicker());
-function tick() {
-  const now = performance.now();
-  const dt = Math.min(0.1, (now - last) / 1000); last = now;
-  const on = engine.capturing;
-  let db = ampToDb(on ? engine.rawAmplitude() * volFactor() : 0);   // in-app: 75% = unity
-  const open = on && engine.gateOpen();
-  if (state.muted) db = -Infinity;
-  if (isHidden()) { smoothed = MIN_DB; peak = MIN_DB; return; }   // hidden in the tray: no drawing
-  drawGateChip(open);
-  const target = Math.max(MIN_DB, Math.min(6, db));
-  smoothed = target > smoothed ? target : smoothed - 40 * dt; // fast attack, slow release
-  smoothed = Math.max(MIN_DB, smoothed);
-  if (smoothed >= peak) { peak = smoothed; peakHold = 1; } else if ((peakHold -= dt) <= 0) peak = Math.max(MIN_DB, peak - 20 * dt);
-  if ((compTick = (compTick + 1) % 8) === 0) {           // ~4x per second
-    if (state.comp) updateCompHint();
-    if (state.gateAuto) refreshGateUi();
-  }
-  // Only GPU-friendly transforms, and only when the value changed; text at most 5x per second.
-  const cover = 'scaleX(' + (1 - dbToPct(smoothed) / 100).toFixed(3) + ')';
-  if (cover !== shownCover && meter.cover) { meter.cover.style.transform = cover; shownCover = cover; }
-  const pk = 'translateX(' + dbToPct(peak).toFixed(1) + '%)';
-  if (pk !== shownPeak && meter.peak) { meter.peak.style.transform = pk; shownPeak = pk; }
-  if (now - dbShownAt >= 200) {
-    dbShownAt = now;
-    const t = state.muted ? 'Muted' : (smoothed <= MIN_DB ? '-∞ dB' : smoothed.toFixed(1) + ' dB');
-    if (t !== shownDb && meter.levelDb) { meter.levelDb.textContent = t; shownDb = t; }
-    drawSendLevel();
-  }
-}
-export function resetGateChip() { shownChip = null; }
-function drawGateChip(open) {
-  const closedByKey = state.ptt && !pttOpen;
-  const text = state.muted || !engine.capturing ? '' : closedByKey ? (state.pttKey ? `Hold ${state.pttKey.label} to talk` : 'Choose a talk key') : open ? 'Gate open' : 'Gate closed';
-  if (text === shownChip || !meter.chip) return;
-  shownChip = text;
-  meter.chip.textContent = text;
-  meter.chip.dataset.state = text === 'Gate open' ? 'open' : text ? 'closed' : 'none';
-}
-function drawSendLevel() {
-  const amp = state.send ? engine.sendAmplitude() : null;
-  if (amp === null || !meter.sendCover) return;
-  const db = Math.max(MIN_DB, ampToDb(amp));
-  sendShown = db > sendShown ? db : Math.max(db, sendShown - 8);
-  const cover = 'scaleX(' + (1 - dbToPct(sendShown) / 100).toFixed(3) + ')';
-  if (cover !== shownSendCover) { meter.sendCover.style.transform = cover; shownSendCover = cover; }
-  const text = sendShown <= MIN_DB ? '-∞ dB' : sendShown.toFixed(1) + ' dB';
-  if (text !== shownSendDb && meter.sendDb) { meter.sendDb.textContent = text; shownSendDb = text; }
-}
-
-// ---- Mic EQ ----
-// Each mic keeps its own EQ, stored by name. A mic seen for the first time starts from the EQ in use.
-const eqByMic = {};
-let eqOwner = null, eqPresetPref = 'flat', eqGraph = null;
-export function attachEqGraph(g) { eqGraph = g; return () => { if (eqGraph === g) eqGraph = null; }; }
-const presetShown = () => (EQ_PRESETS[eqPresetPref] ? eqPresetPref : 'custom');
-function switchEqTo(name) {
-  if (!name) return;
-  ui({ eqFor: 'Saved for ' + name });
-  if (name === eqOwner) return;
-  if (eqOwner) eqByMic[eqOwner] = snapshotEq(view.eqPreset);
-  eqOwner = name;
-  if (eqByMic[name]) { eqPresetPref = restoreEq(eqByMic[name]); ui({ eqPreset: presetShown() }); applyEq(); }
-}
-export function applyEq() {
-  engine.set({ eq });
-  if (eqGraph) eqGraph.draw();
-  ui({ eqVersion: view.eqVersion + 1 });
-}
-// For prefs.js: restore the EQ from saved settings (the chosen mic's own, if it has one), and what to save.
-export function loadEqPrefs(p, deviceName) {
-  if (p.eqByMic && typeof p.eqByMic === 'object') Object.assign(eqByMic, p.eqByMic);
-  const startEq = (deviceName && eqByMic[deviceName]) || p.eq;
-  if (startEq && typeof startEq === 'object') eqPresetPref = restoreEq(startEq);
-  eqOwner = deviceName;
-}
-export const eqPrefs = () => ({
-  eq: snapshotEq(view.eqPreset),
-  eqByMic: eqOwner ? { ...eqByMic, [eqOwner]: snapshotEq(view.eqPreset) } : eqByMic
-});
-// The graph changed a band (dragging, keys, scroll): it's no longer a preset.
-export function eqEdited() { if (view.eqPreset !== 'custom') ui({ eqPreset: 'custom' }); eqPresetPref = 'custom'; applyEq(); scheduleSave(); }
-export const eqEditEnd = () => savePrefs();
-export function selectBand(key) { ui({ eqSel: key }); if (eqGraph) eqGraph.draw(); }
-export function resetSelectedBand() { if (view.eqSel) { resetBand(view.eqSel); eqEdited(); savePrefs(); } }
-export function choosePreset(key) {
-  const p = EQ_PRESETS[key]; if (!p) return;
-  applyPreset(p); eqPresetPref = key; ui({ eqPreset: key }); applyEq(); savePrefs();
-}
-export function setEqOn(on) { eq.on = on; applyEq(); savePrefs(); }
-export function setLowCut(on) { eq.lowCut = on; eqPresetPref = 'custom'; ui({ eqPreset: 'custom' }); applyEq(); savePrefs(); }
-export function setEqOpen(open) {
-  state.eqOpen = open === true;
-  if (!state.eqOpen) ui({ eqSel: null }); else ui();
-  savePrefs();
-}
-// Hold to compare: what you hear skips the EQ; what's sent keeps it.
-export function holdCompare(on) { if (view.eqBypass === on) return; engine.set({ eqBypass: on }); ui({ eqBypass: on }); }
 
 // ---- Live input ----
 function stopCapture() { engine.stopCapture(); }
@@ -347,65 +231,6 @@ function retryWhileAudioStartsUp() {
   }
   startupRetries++;
   startupRetryTimer = setTimeout(() => loadDevices({ retry: true }), 5000);
-}
-
-// ---- Send to other apps (VB-Audio Virtual Cable) ----
-export const isCableLabel = l => /\bCABLE\b.*VB-Audio|VB-Audio Virtual Cable/i.test(l || '');
-let sendToken = 0;
-function sendHint(text, cls) {
-  ui({
-    sendHint: text, sendHintCls: cls || '',
-    sendTitle: cls === 'on' ? 'Sending to the virtual cable. In Discord, choose "CABLE Output (VB-Audio Virtual Cable)" as your input device.' : 'Send the processed mic to VB-Audio Virtual Cable'
-  });
-}
-// What other apps get right now, in words. The level bar only shows while the cable is connected.
-export function updateSendStatus() {
-  const connected = engine.hasSend && state.send && live;
-  ui({ sendLevelShown: connected });
-  if (!connected) return;
-  if (state.muted) sendHint('Muted: nothing is being sent', 'on');
-  else if (state.ptt && !pttOpen) sendHint(state.pttKey ? `Push to talk: hold ${state.pttKey.label} to send` : 'Push to talk: choose a key below', 'on');
-  else sendHint('Sending. In Discord, choose "CABLE Output" as your input', 'on');
-}
-let findCable = async function findCable() {
-  const all = await navigator.mediaDevices.enumerateDevices();
-  const outs = all.filter(d => d.kind === 'audiooutput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
-  return outs.find(d => /CABLE Input/i.test(d.label)) || outs.find(d => isCableLabel(d.label)) || null;
-};
-function stopSending() { state.send = false; engine.set({ send: false }); engine.closeSend(); ui({ sendOn: false }); }
-async function setSend(on) {
-  const token = ++sendToken;
-  if (!on) {
-    stopSending();
-    sendHint('Off: other apps hear your raw mic');
-    updateSendStatus();
-    return;
-  }
-  ui({ sendOn: true });
-  try {
-    const cable = await findCable();
-    if (token !== sendToken) return;
-    if (!cable) {
-      stopSending();
-      sendHint('VB-Audio Virtual Cable not found. Install it from vb-audio.com/Cable, restart the PC, then try again.', 'warn');
-      updateSendStatus();
-      return;
-    }
-    if (!engine.sendingTo(cable.deviceId)) {
-      sendHint('Connecting…');
-      state.send = false; engine.set({ send: false });
-      if (!(await engine.openSend(cable.deviceId)) || token !== sendToken) return;
-    }
-    state.send = true;
-    engine.set({ send: true });
-    if (live) updateSendStatus(); else sendHint('On · but there is no microphone to send', 'warn');
-    ui();
-  } catch (err) {
-    if (token !== sendToken) return;
-    stopSending();
-    sendHint("Couldn't send to the virtual cable (" + (err.name || 'Error') + ': ' + err.message + ')', 'warn');
-    updateSendStatus();
-  }
 }
 
 // ---- Windows microphone control (volume + mute) ----
@@ -548,19 +373,6 @@ export function chooseOutput(id) {
   loadOutputs();
 }
 
-// ---- First-run setup ----
-let freshInstall = false;
-export async function updateSetup() {
-  let found = false;
-  try { found = !!(await findCable()); } catch { /* treated as not found */ }
-  if (found && !freshInstall && !state.setupDone) { state.setupDone = true; savePrefs(); }
-  ui({ setupCable: found ? 'Found: the virtual cable is installed.' : 'Not found yet.', setupDownloadShown: !found, setupCardShown: !state.setupDone, setupOpenShown: !found && state.setupDone });
-}
-export const setupDownload = () => { if (window.appInfo) window.appInfo.open('vbcable'); };
-export const setupCheck = () => loadDevices();
-export function setupFinished() { state.setupDone = true; savePrefs(); updateSetup(); }
-export function setupShow() { state.setupDone = false; freshInstall = true; updateSetup(); }
-
 // ---- Mic test: record 5 s of what Olive sends, then play it back to you (the engine does the audio) ----
 function showTest(label, phase, hint) { ui({ testLabel: label, testPhase: phase, ...(hint !== undefined ? { testHint: hint } : {}) }); }
 const testHeard = e => (e.silent ? 'Nothing got through: the noise gate stayed shut. Talk louder, or turn the gate down'
@@ -589,7 +401,7 @@ export function pressTest() {
 // ---- Start ----
 export function start() {
   const savedPrefs = loadPrefs();
-  freshInstall = !savedPrefs;
+  setFreshInstall(!savedPrefs);
   if (state.send) sendHint('Connecting…');
   ui({ sendOn: state.send, eqPreset: presetShown() });
   renderDevices();
@@ -624,13 +436,7 @@ export function start() {
 }
 
 // For test-bridge.js: things it changes that only this file can.
-export const testHooks = {
-  restoreEq: src => { eqPresetPref = restoreEq(src); },
-  showEqPreset: () => ui({ eqPreset: presetShown() }),
-  eqPoint: key => (eqGraph ? eqGraph.point(key) : null),
-  vars: {
-    freshInstall: [() => freshInstall, v => { freshInstall = v; }], startupRetries: [() => startupRetries, v => { startupRetries = v; }],
-    startupRetryTimer: [() => startupRetryTimer], live: [() => live], findCable: [() => findCable, v => { findCable = v; }],
-    devices: [() => devices], windowHidden: [() => windowHidden, v => { windowHidden = v; }]
-  }
+export const storeTestVars = {
+  startupRetries: [() => startupRetries, v => { startupRetries = v; }], startupRetryTimer: [() => startupRetryTimer],
+  live: [() => live], devices: [() => devices]
 };
