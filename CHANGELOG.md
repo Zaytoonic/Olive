@@ -2,6 +2,13 @@
 
 What changed in each release of Olive. Downloads are on the [Releases](https://github.com/Zaytoonic/Olive/releases) page.
 
+## 1.8.0 (20 November 2026)
+
+- A soundboard: add sound files (MP3, WAV, OGG, FLAC, M4A, up to 2 minutes), then play them to Discord on top of your voice with a click or a hotkey that works from anywhere, even in a game. Each sound has its own volume and name, and there's a Stop all button and hotkey.
+- Sounds skip the noise reduction, gate and EQ, and a limiter stops them clipping. You can hear them yourself or not, and choose whether they play while you're muted.
+- Olive keeps its own copy of each sound, so moving or deleting the original doesn't break it.
+- Closing the window says where Olive went every time, not only the first time.
+
 ## 1.7.0 (11 November 2026)
 
 - A rebuilt window, with new switches, sliders, dropdowns and buttons. Everything is where it was, and the settings still slide in from the right.
