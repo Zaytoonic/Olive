@@ -21,15 +21,20 @@
 - **Push to talk** on any key or side mouse button.
 - **Listen** to hear your processed mic live, on the output device you choose.
 - **Test mic** records 5 seconds of exactly what Olive sends to Discord, then plays it back to you.
+- **Soundboard:** play sound files to Discord over your voice, with a click or a hotkey that works anywhere, even in a game.
 - **Runs in the tray**, can start with Windows, and updates itself in one click.
 - **Settings** you set once (hotkeys, push to talk, mute sounds, the badge, updates) live behind the gear, out of the way. A dot on the gear tells you when something there needs you.
 
 <br clear="right">
 
-## What's new in 1.7.0
-- A rebuilt window, with new switches, sliders, dropdowns and buttons. Everything is where it was.
-- After you plug in or remove a device, or press refresh, Olive keeps looking for your mic for a minute.
-- Since 1.6.4: noise reduction uses RNNoise's 2025 model, and the noise gate waits for more confident voice detection.
+## What's new in 1.8.0
+![The soundboard](docs/soundboard.png)
+
+- **A soundboard.** Add sound files (MP3, WAV, OGG, FLAC or M4A, up to 2 minutes), then click one to play it. Discord hears it over your voice.
+- **Hotkeys for sounds.** Give a sound any key, even a single one like Num 1, and press it anywhere, even in a game. Stop all has its own key.
+- Each sound has its own name and volume. You choose how loud others hear them, whether you hear them too, and whether they play while you're muted.
+- Sounds skip the noise reduction, gate and EQ, and a limiter stops them clipping.
+- Closing the window now says where Olive went every time.
 
 Every release is listed in the [changelog](CHANGELOG.md).
 
@@ -68,7 +73,8 @@ After changing Electron's version, run `npm run update-runtime` before these ste
 ## Project layout
 ```
 src/main/        Electron main process
-  main.js          window, tray, muted badge, start with Windows, updates, app:// for the audio worklets
+  main.js          window, tray, muted badge, start with Windows, updates, hotkeys, app:// for the audio worklets
+  soundboard.js    the soundboard's files: copies sounds into Olive's settings folder, reads and removes them
   migrate.js       moves settings and the login entry from when the app was called Mic Manager
   updates.js       asks GitHub whether a newer version exists, and downloads and checks its installer
   preload.js       safe bridge between the window and main.js
@@ -84,13 +90,14 @@ src/ui/          the window, in React with HeroUI v3 (npm run build:ui builds it
   eq.js            the mic EQ: presets, each mic's own EQ, hold to compare
   cable.js         sending to the virtual cable, and the first-run setup that looks for it
   app-settings.js  the Muted badge, updates and start with Windows
+  board.js         the soundboard: your sounds, playing them, their hotkeys
   test-bridge.js   handles for npm run test:audio
-  App.jsx, Settings.jsx, Equalizer.jsx, bits.jsx   the components
+  App.jsx, Settings.jsx, Equalizer.jsx, Soundboard.jsx, bits.jsx   the components
   eq-model.js, eq-graph.js   the EQ's bands and its canvas graph
   olive.css        Olive's palette on HeroUI's theme, and the meters
 src/renderer/    what the window page loads
   index.html       loads the audio engine, then the window (ui/, built from src/ui)
-  audio-engine.js  the audio chain: mic capture, noise reduction, EQ, gate, compressor, Listen and the cable. It never touches the page, so a new window can drive it the same way
+  audio-engine.js  the audio chain: mic capture, noise reduction, EQ, gate, compressor, soundboard, Listen and the cable. It never touches the page, so a new window can drive it the same way
   badge.html, badge.css  the Muted badge
   voice-worklet.js noise reduction (RNNoise) and the voice gate
   gate-worklet.js  volume gate, for a gate set by hand or as the fallback
