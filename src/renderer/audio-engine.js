@@ -5,9 +5,12 @@
 const engine = (() => {
   // What the window has set. inputGain is the in-app volume (1 when Windows controls the mic level itself).
   // talking is false while muted or while the push-to-talk key is up; talkFade is how fast that change ramps.
+  // Soundboard: boardVol is how loud clips go out (0-1), boardLocal/boardLocalVol whether and how loud you hear them,
+  // boardWhileMuted whether they still go out while you're muted or not holding push to talk.
   const cfg = {
     inputGain: 1, gateDb: -45, gateAuto: true, nr: true, nrAmount: 100, mono: false, comp: false, compAmount: 50,
-    eq: null, eqBypass: false, monitor: false, monitorVol: 80, talking: true, talkFade: 0.02, send: false
+    eq: null, eqBypass: false, monitor: false, monitorVol: 80, talking: true, talkFade: 0.02, send: false,
+    boardVol: 0.8, boardLocal: true, boardLocalVol: 0.8, boardWhileMuted: true
   };
   let bands = [];                                // the EQ's bands: { key, type, freq, q }, in order
   let listener = () => {};
@@ -19,6 +22,7 @@ const engine = (() => {
   let sendCtx = null, sendChain = null, sendSrc = null, sendCableId = null, sendToken = 0;   // send chain -> virtual cable
   let autoGateDb = -51;
   let micTest = null, testPlaying = false;
+  const clips = new Map(), playingClips = new Set();   // soundboard: decoded clips by id, and what's playing now
 
   function rampTo(param, value, tc = 0.02, ctx = audioCtx) {
     if (!param || !ctx) return;
@@ -37,7 +41,7 @@ const engine = (() => {
     if (need && audioCtx.state === 'suspended') audioCtx.resume();
     if (srcNode && need && !srcLinked) { srcNode.connect(mainChain.head); srcLinked = true; }
     if (srcNode && !need && srcLinked) { try { srcNode.disconnect(mainChain.head); } catch {} srcLinked = false; }
-    if (!need && audioCtx.state === 'running' && !testPlaying) audioCtx.suspend();   // a mic test plays back on this context
+    if (!need && audioCtx.state === 'running' && !testPlaying && !playingClips.size) audioCtx.suspend();   // a mic test and clips play back on this context
     syncGateTimer();
   }
 
@@ -47,6 +51,7 @@ const engine = (() => {
     try {
       audioCtx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
       mainChain = buildChain(audioCtx);   // its analyser (~21 ms per reading) also drives the level meter
+      updateBoardGains();
       // After setSinkId, 30 s of pure silence slows this context's clock to about 72%. A signal far too quiet to hear (-140 dB) keeps it at full speed.
       const keepClock = audioCtx.createConstantSource();
       keepClock.offset.value = 1e-7;
@@ -82,8 +87,19 @@ const engine = (() => {
     const outMeter = ctx.createAnalyser();        // what actually leaves this chain, after gate, compressor and mute
     outMeter.fftSize = 1024;
     outGain.connect(outMeter);
+    // Soundboard clips: their own way out, joining after the voice processing and after mute (outGain), with a limiter
+    // so a loud clip can't clip. The voice path doesn't go through it, so it gains no delay. Chromium's compressor adds
+    // its own makeup gain (+3.4 dB at these settings), so the real ceiling is about -2 dB, even for clips past full scale.
+    const board = ctx.createGain(), boardLimit = ctx.createDynamicsCompressor();
+    board.gain.value = 0;
+    boardLimit.threshold.value = -6; boardLimit.knee.value = 0; boardLimit.ratio.value = 20;
+    boardLimit.attack.value = 0.001; boardLimit.release.value = 0.1;
+    board.connect(boardLimit); boardLimit.connect(ctx.destination);
+    const boardMeter = ctx.createAnalyser();      // what clips send out of this chain
+    boardMeter.fftSize = 1024;
+    boardLimit.connect(boardMeter);
     const ch = { ctx, head, rawMeter, hp, bands: filters, input: hp, output, volGain, comp, compOn: null, gateGain, outGain,
-                 meter, meterBuf: new Float32Array(meter.fftSize), outMeter, gateIsOpen: false, holdUntil: 0 };
+                 meter, meterBuf: new Float32Array(meter.fftSize), outMeter, gateIsOpen: false, holdUntil: 0, board, boardLimit, boardMeter };
     applyCompTo(ch);
     applyMonoTo(ch);
     applyEqTo(ch);
@@ -172,6 +188,7 @@ const engine = (() => {
     if (has('monitor')) syncChains();
     if (has('monitor') || has('monitorVol') || has('talking') || has('talkFade')) updateMonitorGain();
     if (has('send') || has('talking') || has('talkFade')) updateSendGain();
+    if (['send', 'talking', 'boardVol', 'boardLocal', 'boardLocalVol', 'boardWhileMuted'].some(has)) updateBoardGains();
   }
 
   // ---- Levels ----
@@ -416,6 +433,7 @@ const engine = (() => {
     connectSendSource();
     syncChains();
     updateSendGain();
+    updateBoardGains();
   }
   const sendingTo = cableId => !!sendChain && sendCableId === cableId && sendCtx.state !== 'closed';
   // Builds a send chain playing on that output device. Resolves true when it's running, false if closeSend or another
@@ -434,6 +452,69 @@ const engine = (() => {
     return true;
   }
   function closeSend() { ++sendToken; updateSendGain(); teardownSend(); }
+
+  // ---- Soundboard: clips play into the send chain (what Discord hears) and, if you want, on your own output ----
+  // A clip is decoded once (at 48 kHz, both engines' rate) and played on both engines from the same buffer.
+  // report-free: the window reads clipsPlaying and gets onChange() when a clip starts or ends.
+  // With nothing playing the gain is set at once, not faded: Chromium only advances a fade while sound flows through the
+  // node, so a fade set while idle would only start with the next clip, and its first ~50 ms would get out (measured).
+  function updateBoardGains() {
+    const to = (ch, v) => {
+      if (playingClips.size) rampTo(ch.board.gain, v, 0.02, ch.ctx);
+      else { ch.board.gain.cancelScheduledValues(0); ch.board.gain.setValueAtTime(v, ch.ctx.currentTime); }
+    };
+    if (sendChain) to(sendChain, cfg.send && (cfg.talking || cfg.boardWhileMuted) ? cfg.boardVol : 0);
+    if (mainChain) to(mainChain, cfg.boardLocal ? cfg.boardLocalVol : 0);
+  }
+  // Decodes a sound file (ArrayBuffer of wav, mp3, ogg, flac...) and keeps it under id. Resolves with its length in seconds.
+  async function loadClip(id, data) {
+    if (!audioCtx) throw new Error('audio engine unavailable');
+    const buf = await audioCtx.decodeAudioData(data.slice(0));
+    clips.set(id, buf);
+    return buf.duration;
+  }
+  function unloadClip(id) { stopClip(id); clips.delete(id); }
+  // Plays a clip (volume 0-1, on top of boardVol). Playing one that's already playing starts it again.
+  // Returns false if it isn't loaded or there's nowhere to play it.
+  function playClip(id, volume = 1) {
+    const buf = clips.get(id);
+    if (!buf || !audioCtx) return false;
+    stopClip(id, false);
+    const play = { id, sources: [] };
+    const start = ch => {
+      const src = ch.ctx.createBufferSource(), g = ch.ctx.createGain();
+      src.buffer = buf; g.gain.value = volume;
+      src.connect(g); g.connect(ch.board);
+      src.onended = () => {
+        play.sources = play.sources.filter(x => x.src !== src);
+        try { g.disconnect(); } catch {}
+        if (!play.sources.length && playingClips.delete(play)) clipsChanged();
+      };
+      src.start();
+      play.sources.push({ src, g });
+    };
+    if (sendChain) start(sendChain);
+    if (mainChain && cfg.boardLocal) {
+      if (audioCtx.state !== 'running') audioCtx.resume().catch(() => {});   // asleep while sending without Listen
+      start(mainChain);
+    }
+    if (!play.sources.length) return false;
+    playingClips.add(play);
+    clipsChanged();
+    return true;
+  }
+  function stopClip(id, notify = true) {
+    for (const play of [...playingClips]) {
+      if (play.id !== id) continue;
+      playingClips.delete(play);
+      for (const { src, g } of play.sources) { src.onended = null; try { src.stop(); } catch {} try { g.disconnect(); } catch {} }
+    }
+    if (notify) clipsChanged();
+  }
+  function stopClips() { for (const play of [...playingClips]) stopClip(play.id, false); clipsChanged(); }
+  function clipsChanged() { if (!playingClips.size) updateBoardGains(); syncChains(); changed(); }   // finishes any fade cut short
+  const clipsPlaying = () => [...new Set([...playingClips].map(p => p.id))];
+  function boardAmplitude() { return sendChain ? chainAmplitude(sendChain, sendChain.boardMeter) : null; }
 
   // ---- Mic test: record 5 s of what Olive sends, then play it back on your own output ----
   // Recorded after noise reduction, EQ, volume, gate and compressor, and before mute and push to talk: what Discord gets
@@ -520,6 +601,7 @@ const engine = (() => {
   return {
     init, set, capture, stopCapture, isCapturing, setOutput, openSend, closeSend, sendingTo,
     startMicTest, finishRecording, endMicTest,
+    loadClip, unloadClip, playClip, stopClip, stopClips, clipsPlaying, boardAmplitude,
     rawAmplitude, chainAmplitude, sendAmplitude, compReduction, status, meterChain,
     gateOpen: () => capturing && !!meterChain() && meterChain().gateIsOpen,
     onChange(fn) { listener = fn; },

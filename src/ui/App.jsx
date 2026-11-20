@@ -5,6 +5,7 @@ import { useView as useV } from './store.js';
 import { Hint, Icon, Level, Pick, Row, Toggle, Value } from './bits.jsx';
 import { Equalizer } from './Equalizer.jsx';
 import { Settings } from './Settings.jsx';
+import { Soundboard } from './Soundboard.jsx';
 
 export function App() {
   return (
@@ -23,6 +24,7 @@ export function App() {
               <Section title="Output"><Send /><Mono /><Monitoring /><OutputDevice /></Section>
             </div>
           </div>
+          <Section title="Soundboard"><Soundboard /></Section>
           <Section title="Equalizer"><Equalizer /></Section>
         </div>
       </main>
