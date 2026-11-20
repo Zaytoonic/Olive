@@ -3,7 +3,6 @@
 // The engine plays them into what Discord hears (with Send on) and, if you like, on your own output.
 import { engine, state, ui, cleanErr } from './core.js';
 import { savePrefs, scheduleSave } from './prefs.js';
-import { hotkeyFromEvent, hotkeyLabel } from './keys.js';
 
 export const BOARD_MAX_SECONDS = 120;   // decoded, a clip takes ~23 MB a minute; soundboard sounds are short
 const api = () => window.appBoard;
@@ -116,8 +115,9 @@ export function setBoardLocalVol(v) { state.boardLocalVol = v; engine.set(boardE
 export function setBoardWhileMuted(on) { state.boardWhileMuted = on; engine.set(boardEngineCfg()); show(); savePrefs(); }
 
 // ---- Hotkeys: one per sound, and one for Stop all ----
-// They work from anywhere, like the mute hotkey (main.js registers them). Choosing one: the next key combination
-// pressed in this window becomes it. All of them are released while choosing, so pressing one that's taken reaches
+// They work from anywhere, like the mute hotkey (main.js registers them). Any key works, alone or with Ctrl, Alt, Shift
+// or Win: it's your choice. A key alone that other apps type with (a letter, a number) is taken from them while it's set,
+// and the window says so. Choosing one: the next key (or combination) pressed in this window becomes it. All of them are released while choosing, so pressing one that's taken reaches
 // this window and can be refused here instead of playing its sound.
 let choosing = null;                     // a sound's id, or 'stop'
 export async function applyBoardKeys() {
@@ -127,6 +127,24 @@ export async function applyBoardKeys() {
   try { res = await api().setKeys(list); } catch { /* treated as not registered */ }
   show({ boardKeyFailed: list.filter(([a]) => !res[a]).map(([a]) => a) });
 }
+// KeyboardEvent.code -> the key's name in an Electron accelerator (main.js checks the same list)
+const KEY_NAMES = {
+  Numpad0: 'num0', Numpad1: 'num1', Numpad2: 'num2', Numpad3: 'num3', Numpad4: 'num4', Numpad5: 'num5', Numpad6: 'num6', Numpad7: 'num7',
+  Numpad8: 'num8', Numpad9: 'num9', NumpadAdd: 'numadd', NumpadSubtract: 'numsub', NumpadMultiply: 'nummult', NumpadDivide: 'numdiv', NumpadDecimal: 'numdec',
+  Insert: 'Insert', Delete: 'Delete', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+  ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Space: 'Space', Tab: 'Tab', Backspace: 'Backspace', Enter: 'Enter',
+  Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/'
+};
+function boardKeyFromEvent(e) {
+  const letter = /^Key([A-Z])$/.exec(e.code), digit = /^Digit(\d)$/.exec(e.code), fn = /^F(?:[1-9]|1\d|2[0-4])$/.test(e.code);
+  const key = letter ? letter[1] : digit ? digit[1] : fn ? e.code : KEY_NAMES[e.code];
+  if (!key) return null;
+  return [e.ctrlKey && 'Control', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super', key].filter(Boolean).join('+');
+}
+const NICE = { num: 'Num ', numadd: 'Num +', numsub: 'Num -', nummult: 'Num *', numdiv: 'Num /', numdec: 'Num .', Up: '↑', Down: '↓', Left: '←', Right: '→' };
+export const boardKeyLabel = acc => acc.split('+').map(k => (k === 'Control' ? 'Ctrl' : k === 'Super' ? 'Win' : NICE[k] || (/^num\d$/.test(k) ? 'Num ' + k.slice(3) : k))).join('+');
+// A key alone that other apps type or play with: while it's a hotkey, they don't get it.
+export const takesTypingKey = acc => !!acc && !acc.includes('+') && !/^(F\d+|num.*|Insert|Delete|Home|End|PageUp|PageDown)$/.test(acc);
 const keyOwner = acc => (acc === 'Control+M' ? 'Ctrl+M (mute, in this window)' : state.muteHotkey && state.muteAccel === acc ? 'the mute hotkey'
   : state.boardStopKey === acc ? 'Stop all'
   : (c => (c ? `"${c.name}"` : null))(state.board.find(c => c.key === acc)));
@@ -137,7 +155,7 @@ function setKey(target, acc) {
 export function startChoosingBoardKey(target) {
   if (choosing || !api()) return;
   choosing = target;
-  show({ boardChoosing: target, boardKeyFor: target, boardKeyHint: 'Press the shortcut: Ctrl, Alt or Win with a letter or number, or an F key. Esc cancels' });
+  show({ boardChoosing: target, boardKeyFor: target, boardKeyHint: 'Press a key, or a combination like Ctrl+1. Esc cancels' });
   applyBoardKeys();
 }
 function finishChoosing(acc) {
@@ -146,7 +164,7 @@ function finishChoosing(acc) {
   let msg = '';
   if (acc) {
     const owner = keyOwner(acc);
-    if (owner && !(target === 'stop' ? state.boardStopKey === acc : (state.board.find(c => c.id === target) || {}).key === acc)) msg = `${hotkeyLabel(acc)} is already used by ${owner}`;
+    if (owner && !(target === 'stop' ? state.boardStopKey === acc : (state.board.find(c => c.id === target) || {}).key === acc)) msg = `${boardKeyLabel(acc)} is already used by ${owner}`;
     else { setKey(target, acc); savePrefs(); }
   }
   show({ boardChoosing: null, boardKeyFor: target, boardKeyHint: msg });
@@ -158,9 +176,8 @@ window.addEventListener('keydown', e => {
   e.preventDefault(); e.stopImmediatePropagation();
   if (e.code === 'Escape') { finishChoosing(null); return; }
   if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;   // still holding modifiers
-  const acc = hotkeyFromEvent(e);
+  const acc = boardKeyFromEvent(e);
   if (acc) finishChoosing(acc);
-  else show({ boardKeyHint: 'Use Ctrl, Alt or Win with a letter or number, or an F key. Esc cancels' });
+  else show({ boardKeyHint: "That key can't be used. Try another, or press Esc to cancel" });
 }, true);
 window.addEventListener('blur', () => { if (choosing) finishChoosing(null); });
-export { hotkeyLabel as boardKeyLabel };

@@ -347,6 +347,12 @@ function pressHotkey(holdRepeats = 0, letterVk = 0x4D) {
     `foreach ($k in ${letterVk},0x12,0x11) { [T.K]::keybd_event($k,0,2,[UIntPtr]::Zero) }`;
   execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore' });
 }
+// Presses one key alone (down, 40 ms, up), through Windows.
+function tapKey(vk) {
+  const ps = "Add-Type -Name K -Namespace T -MemberDefinition '[DllImport(\"user32.dll\")] public static extern void keybd_event(byte v, byte s, uint f, UIntPtr e);';" +
+    `[T.K]::keybd_event(${vk},0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 40; [T.K]::keybd_event(${vk},0,2,[UIntPtr]::Zero)`;
+  execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore' });
+}
 function pressKey(vk, up) {
   const ps = "Add-Type -Name K -Namespace T -MemberDefinition '[DllImport(\"user32.dll\")] public static extern void keybd_event(byte v, byte s, uint f, UIntPtr e);';" +
     `[T.K]::keybd_event(${vk},0,${up ? 2 : 0},[UIntPtr]::Zero)`;
@@ -909,35 +915,50 @@ async function liveChecks(profile, wav, fixture) {
         out.stop = state.boardStopKey;
         startChoosingBoardKey(id); press('Escape', false, false); await wait(300);   // Esc keeps the old one
         out.afterEsc = state.board[0].key;
-        startChoosingBoardKey(id); press('KeyQ', false, false); await wait(100);     // a plain letter isn't allowed
-        out.plainHint = getView().boardKeyHint; out.stillChoosing = getView().boardChoosing === id;
-        press('Escape', false, false); await wait(300);
+        out.labels = ['Control+Alt+K', 'num7', 'numadd', 'Q', 'Up'].map(boardKeyLabel);
+        out.typing = ['Q', '1', 'Space', 'num7', 'F9', 'Control+Q', 'Home'].map(takesTypingKey);
         out.failed = getView().boardKeyFailed;
         const saved = JSON.parse(localStorage.getItem(PREFS_KEY));
         out.saved = [saved.board[0].key, saved.boardStopKey];
         return out;
       }, press.toString());
       check('a sound\'s hotkey and the stop-all hotkey are chosen and saved', k.key === 'Control+Alt+K' && k.stop === 'Control+Alt+J' && k.saved[0] === 'Control+Alt+K' && k.saved[1] === 'Control+Alt+J', `${k.key}, stop ${k.stop}, saved ${k.saved.join(' / ')}`);
-      check('a key that is already used is refused, Esc keeps the old one, a plain letter isn\'t taken', k.refusedStop === null && /already used by "Horn"/.test(k.refusedHint) && k.afterEsc === 'Control+Alt+K' && /Ctrl, Alt or Win/.test(k.plainHint) && k.stillChoosing, `"${k.refusedHint}"; after Esc ${k.afterEsc}; "${k.plainHint}"`);
-      const pressedPlays = async () => {
-        pressHotkey(0, 0x4B); await sleep(250);
+      check('a key that is already used is refused, and Esc keeps the old one', k.refusedStop === null && /already used by "Horn"/.test(k.refusedHint) && k.afterEsc === 'Control+Alt+K', `"${k.refusedHint}"; after Esc ${k.afterEsc}`);
+      check('keys read the way they look on the keyboard', JSON.stringify(k.labels) === '["Ctrl+Alt+K","Num 7","Num +","Q","↑"]', k.labels.join(', '));
+      check('a key alone that other apps type with is flagged, others are not', JSON.stringify(k.typing) === '[true,true,true,false,false,false,false]', JSON.stringify(k.typing));
+      // presses: playVk is the play key's virtual-key code; with mods it's pressed with Ctrl+Alt
+      const pressedPlays = async (playVk, mods) => {
+        if (mods) pressHotkey(0, playVk); else tapKey(playVk);
+        await sleep(250);
         const on = await copy.call(() => engine.clipsPlaying().length);
         pressHotkey(0, 0x4A); await sleep(250);
         const off = await copy.call(() => engine.clipsPlaying().length);
         return { on, off };
       };
+      let single = null;
       if (k.failed.length) console.log(`  SKIP  hotkey presses: another app holds ${k.failed.join(', ')}`);
       else {
-        const hk = await pressedPlays();
+        const hk = await pressedPlays(0x4B, true);
         check('pressing the sound\'s hotkey anywhere plays it, the stop-all hotkey stops it', hk.on === 1 && hk.off === 0, `${hk.on} playing after Ctrl+Alt+K, ${hk.off} after Ctrl+Alt+J`);
+        // one button: Num 7 alone
+        single = await copy.call(async pressSrc => {
+          const press = eval(pressSrc);
+          startChoosingBoardKey(state.board[0].id); press('Numpad7', false, false); await new Promise(r => setTimeout(r, 300));
+          return { key: state.board[0].key, failed: getView().boardKeyFailed };
+        }, press.toString());
+        if (single.key !== 'num7' || single.failed.length) check('a single key (Num 7) can be a hotkey', false, `key ${single.key}, not registered: ${single.failed.join(', ')}`);
+        else {
+          const one = await pressedPlays(0x67, false);
+          check('a single key (Num 7) can be a hotkey, and pressing it plays the sound', one.on === 1 && one.off === 0, `${one.on} playing after Num 7, ${one.off} after Ctrl+Alt+J`);
+        }
       }
 
       // after a restart of the window: still there, and it plays
       await copy.cdp('Page.reload', { ignoreCache: true });
       await sleep(5000);
-      if (!k.failed.length) {
-        const hk = await pressedPlays();
-        check('after a restart the hotkeys work again', hk.on === 1 && hk.off === 0, `${hk.on} playing after Ctrl+Alt+K, ${hk.off} after Ctrl+Alt+J`);
+      if (single && single.key === 'num7' && !single.failed.length) {
+        const hk = await pressedPlays(0x67, false);
+        check('after a restart the hotkeys work again', hk.on === 1 && hk.off === 0, `${hk.on} playing after Num 7, ${hk.off} after Ctrl+Alt+J`);
       }
       const r = await copy.call(async () => {
         const wait = ms => new Promise(r => setTimeout(r, ms)), out = {};
