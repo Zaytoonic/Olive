@@ -12,6 +12,7 @@ import { initBadge, initUpdates, initStartup } from './app-settings.js';
 import { isHidden, resetLevel, syncTicker } from './meters.js';
 import { switchEqTo, presetShown } from './eq.js';
 import { isCableLabel, sendHint, updateSendStatus, setSend, setFreshInstall, updateSetup } from './cable.js';
+import { boardChanged, boardEngineCfg, initBoard } from './board.js';
 
 // What the components use from the other parts.
 export { dbToPct, state, getView, useView } from './core.js';
@@ -22,6 +23,10 @@ export {
   attachEqGraph, applyEq, eqEdited, eqEditEnd, selectBand, resetSelectedBand, choosePreset, setEqOn, setLowCut, setEqOpen, holdCompare
 } from './eq.js';
 export { isCableLabel, updateSendStatus, updateSetup, setupDownload, setupCheck, setupFinished, setupShow } from './cable.js';
+export {
+  addSounds, dropSounds, playSound, stopSounds, renameSound, setSoundVol, removeSound, selectSound,
+  setBoardVol, setBoardLocal, setBoardLocalVol, setBoardWhileMuted, BOARD_MAX_SECONDS, startChoosingBoardKey, clearBoardKey, boardKeyLabel, takesTypingKey
+} from './board.js';
 export { setBadge, setBadgeCorner, pressUpdate, openReleaseNotes, setUpdateAuto, setStartup, setSettingsOpen, settingsReasons } from './app-settings.js';
 
 export let devices = [];
@@ -405,13 +410,14 @@ export function start() {
   if (state.send) sendHint('Connecting…');
   ui({ sendOn: state.send, eqPreset: presetShown() });
   renderDevices();
-  engine.onChange(() => { shownGate = ''; refreshGateUi(); updateHints(); });
+  engine.onChange(() => { shownGate = ''; refreshGateUi(); updateHints(); boardChanged(); });
   engine.set({
     inputGain: volFactor(), gateDb: state.gateDb, gateAuto: state.gateAuto, nr: state.nr, nrAmount: state.nrAmount, mono: state.mono,
     comp: state.comp, compAmount: state.compAmount, eq, monitor: state.monitor, monitorVol: state.monitorVol,
-    talking: talking(), talkFade: talkFade(), send: state.send
+    talking: talking(), talkFade: talkFade(), send: state.send, ...boardEngineCfg()
   });
   engine.init(EQ_BANDS);
+  initBoard();
   applyMono();
   updateGate(); updateHints(); updateCompHint();
   initStartup();

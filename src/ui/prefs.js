@@ -1,8 +1,9 @@
 // ---- Saved settings ----
-// Restored on start: mic, volume (in-app), gate, mono, noise reduction, monitor level, EQ, send.
+// Restored on start: mic, volume (in-app), gate, mono, noise reduction, monitor level, EQ, send, soundboard.
 // Not restored on purpose: Listen (could cause feedback at launch) and Mute (Windows keeps its own).
 import { state, showNotice } from './core.js';
 import { loadEqPrefs, eqPrefs } from './eq.js';
+import { loadBoardPrefs, boardPrefs } from './board.js';
 
 export const PREFS_KEY = 'olive.settings.v1';
 export const OLD_PREFS_KEY = 'micManager.settings.v1';   // the old name, from before the rebrand
@@ -49,6 +50,7 @@ export function loadPrefs() {
   state.badge = p.badge !== false;
   if (['top-left', 'top-center', 'top-right', 'bottom-left', 'bottom-right'].includes(p.badgeCorner)) state.badgeCorner = p.badgeCorner;
   loadEqPrefs(p, pref.deviceName);
+  loadBoardPrefs(p);
   return p;
 }
 export function savePrefs() {
@@ -59,7 +61,8 @@ export function savePrefs() {
     ptt: state.ptt, pttKey: state.pttKey, outputId: state.outputId, outputName: state.outputName, setupDone: state.setupDone, updateAuto: state.updateAuto,
     comp: state.comp, compAmount: state.compAmount, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel, eqOpen: state.eqOpen,
     muteSounds: state.muteSounds, muteSoundVol: state.muteSoundVol, badge: state.badge, badgeCorner: state.badgeCorner,
-    ...eqPrefs()
+    ...eqPrefs(),
+    ...boardPrefs()
   };
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (err) { showNotice("Your settings couldn't be saved, so changes will be lost when Olive closes: " + err.message); }
 }

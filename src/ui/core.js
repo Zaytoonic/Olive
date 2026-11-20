@@ -13,7 +13,8 @@ export const state = {
   volume: 75, muted: false, gateDb: -45, gateAuto: true,
   nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M', eqOpen: false,
   ptt: false, pttKey: null, outputId: 'default', outputName: null, setupDone: false, updateAuto: true,
-  muteSounds: true, muteSoundVol: 100, badge: true, badgeCorner: 'top-left'
+  muteSounds: true, muteSoundVol: 100, badge: true, badgeCorner: 'top-left',
+  board: [], boardVol: 80, boardLocal: true, boardLocalVol: 80, boardWhileMuted: true, boardStopKey: null
 };
 export let view = {
   st: { ...state },
@@ -31,7 +32,8 @@ export let view = {
   soundHint: '', badgeAvailable: true, badgeHint: '',
   updateHint: "Asks GitHub once a day if there's a new version", updateBtnLabel: 'Check now', updateBtnDisabled: false, updateNotesShown: false, updateAvailable: null,
   startupOn: false, startupHint: 'Opens hidden in the tray when you log in', startupDisabled: false,
-  appVersion: 'Olive', settingsOpen: false
+  appVersion: 'Olive', settingsOpen: false,
+  boardPlaying: [], boardFailed: [], boardSel: null, boardHint: '', boardHintTone: '', boardChoosing: null, boardKeyFailed: [], boardKeyHint: '', boardKeyFor: null
 };
 const listeners = new Set();
 let notifyQueued = false;
