@@ -36,6 +36,7 @@ function serveWorklet(request) {
 const { HelperClient } = require('./sysmic-client');
 const { OLD_SETTINGS_FOLDER, migrateSettings, moveLoginEntry, repairLoginEntry } = require('./migrate');
 const { GITHUB, checkForUpdate, downloadInstaller } = require('./updates');
+const { initSoundboard } = require('./soundboard');
 
 // ---- Windows microphone control (volume + mute) via the win-audio helper ----
 const HELPER_EXE = path.join(__dirname, 'win-audio.exe');
@@ -202,6 +203,35 @@ ipcMain.handle('mute:hotkey', (event, accelerator) => {
   if (ok) muteHotkey = accelerator;
   return ok;
 });
+// ---- Soundboard hotkeys ----
+// The page sends the whole list ([accelerator, sound id] pairs, 'stop' for stop-all) whenever it changes; the old ones
+// are released first. Returns { accelerator: true/false }: false if another app (or the mute hotkey) holds it.
+// Holding a key plays its sound once, like the mute hotkey: Windows' repeats are ignored.
+// Any key, alone or with modifiers: the same names the page's boardKeyFromEvent produces.
+const BOARD_KEY = /^(?:(?:Control|Alt|Shift|Super)\+)*(?:[A-Z0-9]|F(?:[1-9]|1\d|2[0-4])|num[0-9]|numadd|numsub|nummult|numdiv|numdec|Insert|Delete|Home|End|PageUp|PageDown|Up|Down|Left|Right|Space|Tab|Backspace|Enter|[`\-=[\]\\;',./])$/;
+let boardKeys = [];
+const boardLastPress = new Map();
+ipcMain.handle('board:keys', (event, list) => {
+  boardKeys.forEach(a => { try { globalShortcut.unregister(a); } catch {} });
+  boardKeys = [];
+  const result = {};
+  for (const pair of Array.isArray(list) ? list.slice(0, 250) : []) {
+    const [accelerator, id] = Array.isArray(pair) ? pair : [];
+    if (typeof accelerator !== 'string' || typeof id !== 'string') continue;
+    if (!BOARD_KEY.test(accelerator) || accelerator === muteHotkey || boardKeys.includes(accelerator)) { result[accelerator] = false; continue; }
+    let ok = false;
+    try {
+      ok = globalShortcut.register(accelerator, () => {
+        const now = Date.now(), repeat = now - (boardLastPress.get(accelerator) || 0) < 600;
+        boardLastPress.set(accelerator, now);
+        if (!repeat && win && !win.isDestroyed()) win.webContents.send('board:key', id);
+      });
+    } catch { ok = false; }
+    if (ok) boardKeys.push(accelerator);
+    result[accelerator] = ok;
+  }
+  return result;
+});
 ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('app:notices', () => notices.splice(0));
 // ---- Updates ----
@@ -359,6 +389,7 @@ if (!app.requestSingleInstanceLock()) {
     fixLoginItem();
     upgradeLoginItem();
     protocol.handle('app', serveWorklet);
+    initSoundboard();
     // Allow microphone access for the app's own page only (no camera, no other permissions).
     session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => {
       cb(permission === 'media' && (details.mediaTypes || []).every(t => t === 'audio'));

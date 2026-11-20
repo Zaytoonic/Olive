@@ -255,6 +255,10 @@ class Copy {
       this.ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
     });
   }
+  // A raw DevTools call (for what Runtime.evaluate can't do, like giving a file input real files).
+  cdp(method, params = {}) {
+    return new Promise(resolve => { const id = ++this.seq; this.pending.set(id, d => resolve(d.result)); this.ws.send(JSON.stringify({ id, method, params })); });
+  }
   stop() {
     try { if (this.ws) this.ws.close(); } catch {}
     try { execFileSync('taskkill', ['/PID', String(this.proc.pid), '/T', '/F'], { stdio: 'ignore' }); } catch {}
@@ -341,6 +345,12 @@ function pressHotkey(holdRepeats = 0, letterVk = 0x4D) {
     `foreach ($k in 0x11,0x12,${letterVk}) { [T.K]::keybd_event($k,0,0,[UIntPtr]::Zero) };` +
     (holdRepeats ? `Start-Sleep -Milliseconds 500; 1..${holdRepeats} | ForEach-Object { [T.K]::keybd_event(${letterVk},0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 33 };` : 'Start-Sleep -Milliseconds 40;') +
     `foreach ($k in ${letterVk},0x12,0x11) { [T.K]::keybd_event($k,0,2,[UIntPtr]::Zero) }`;
+  execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore' });
+}
+// Presses one key alone (down, 40 ms, up), through Windows.
+function tapKey(vk) {
+  const ps = "Add-Type -Name K -Namespace T -MemberDefinition '[DllImport(\"user32.dll\")] public static extern void keybd_event(byte v, byte s, uint f, UIntPtr e);';" +
+    `[T.K]::keybd_event(${vk},0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 40; [T.K]::keybd_event(${vk},0,2,[UIntPtr]::Zero)`;
   execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore' });
 }
 function pressKey(vk, up) {
@@ -782,6 +792,188 @@ async function liveChecks(profile, wav, fixture) {
       check('it works while muted, and nothing leaves Olive', mt.mutedPeak > -50 && /muted/.test(mt.mutedHint) && mt.mutedOut < 0.001, `peak ${f1(mt.mutedPeak)} dB, output level ${mt.mutedOut}, "${mt.mutedHint}"`);
       check('it says so when nothing got through the gate', /Nothing got through/.test(mt.shutHint), `"${mt.shutHint}"`);
       check('while sending: recorded from the sending engine, never played into it', mt.sendRecordedFrom && mt.sendPlayedOn && mt.sendPeak > -50 && mt.mainWhilePlaying === 'running' && mt.mainAfter === 'suspended', `peak ${f1(mt.sendPeak)} dB; your output engine ${mt.mainWhilePlaying} while playing, ${mt.mainAfter} after`);
+    }
+
+    if (wanted('board')) {
+      console.log('\nSoundboard');
+      const b = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), out = {};
+        // a 1.2 s 440 Hz tone at full scale, as a wav file: loud enough to need the limiter
+        const sr = 48000, n = Math.round(sr * 1.2), wav = new ArrayBuffer(44 + n * 2), dv = new DataView(wav);
+        const str = (o, t) => [...t].forEach((c, i) => dv.setUint8(o + i, c.charCodeAt(0)));
+        str(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); str(8, 'WAVEfmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+        dv.setUint16(22, 1, true); dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+        str(36, 'data'); dv.setUint32(40, n * 2, true);
+        for (let i = 0; i < n; i++) dv.setInt16(44 + i * 2, Math.round(32767 * Math.sin(2 * Math.PI * 440 * i / sr)), true);
+        const peakOf = async (an, ms) => {             // the loudest sample an analyser sees over ms
+          const buf = new Float32Array(an.fftSize); let pk = 0;
+          for (const t0 = performance.now(); performance.now() - t0 < ms; await wait(15)) { an.getFloatTimeDomainData(buf); for (const v of buf) pk = Math.max(pk, Math.abs(v)); }
+          return 20 * Math.log10(pk + 1e-9);
+        };
+        clearTimeout(startupRetryTimer); startupRetries = 99;   // its rescans would turn Send off: the test copy has no cable
+        out.seconds = await engine.loadClip('tone', wav);
+        setMonitor(false);
+        engine.useSendContext(new AudioContext({ sampleRate: 48000 }));
+        engine.set({ send: true });
+        await wait(1500);
+        out.mainBefore = engine.audioCtx.state;
+        // muted: the clip still goes out, your voice doesn't
+        toggleMute(); await wait(300);
+        out.started = engine.playClip('tone');
+        await wait(60);
+        out.playing = engine.clipsPlaying().includes('tone');
+        out.mainWhile = engine.audioCtx.state;
+        out.sentPeak = await peakOf(engine.sendChain.boardMeter, 700);
+        out.localPeak = await peakOf(engine.mainChain.boardMeter, 200);
+        out.voiceWhileMuted = engine.sendChain.outGain.gain.value;
+        await wait(800);
+        out.endedByItself = engine.clipsPlaying().length === 0;
+        await wait(300);
+        out.mainAfter = engine.audioCtx.state;
+        // muted with "clips while muted" off: nothing goes out
+        // set while nothing plays, then a clip right away: none of it may get out, not even its first milliseconds
+        engine.set({ boardWhileMuted: false });
+        engine.playClip('tone');
+        out.mutedOffPeak = await peakOf(engine.sendChain.boardMeter, 400);
+        engine.stopClips();
+        engine.set({ boardWhileMuted: true });
+        toggleMute(); await wait(200);
+        // stop all
+        engine.playClip('tone'); await wait(250);
+        engine.stopClips(); await wait(150);
+        out.stoppedList = engine.clipsPlaying().length;
+        out.stoppedPeak = await peakOf(engine.sendChain.boardMeter, 200);
+        // Send off: nothing to the cable
+        engine.set({ send: false });
+        engine.playClip('tone');
+        out.sendOffPeak = await peakOf(engine.sendChain.boardMeter, 400);
+        engine.stopClips();
+        engine.unloadClip('tone');
+        out.unloaded = engine.playClip('tone') === false;
+        engine.closeSend(); engine.set({ send: state.send }); await wait(300);
+        return out;
+      });
+      check('a sound file loads', Math.abs(b.seconds - 1.2) < 0.01, `${f1(b.seconds)} s`);
+      check('a clip goes out while muted, and your voice does not', b.started && b.playing && b.sentPeak > -10 && b.voiceWhileMuted < 0.001, `clip peak ${f1(b.sentPeak)} dB, voice level ${b.voiceWhileMuted}`);
+      check('a full-scale clip is limited, never clipped', b.sentPeak < -1.5, `peak ${f1(b.sentPeak)} dB (ceiling about -2 dB)`);
+      check('you hear it too; the sleeping engine wakes for it and sleeps after', b.localPeak > -10 && b.mainBefore === 'suspended' && b.mainWhile === 'running' && b.mainAfter === 'suspended', `your output ${f1(b.localPeak)} dB; engine ${b.mainBefore} -> ${b.mainWhile} -> ${b.mainAfter}`);
+      check('it ends by itself', b.endedByItself, `${b.endedByItself}`);
+      check('"clips while muted" off keeps it in while muted', b.mutedOffPeak < -60, `peak ${f1(b.mutedOffPeak)} dB`);
+      check('stop all stops it', b.stoppedList === 0 && b.stoppedPeak < -60, `${b.stoppedList} playing, peak ${f1(b.stoppedPeak)} dB`);
+      check('with Send off, nothing goes to the cable', b.sendOffPeak < -60, `peak ${f1(b.sendOffPeak)} dB`);
+      check('a removed clip no longer plays', b.unloaded, `${b.unloaded}`);
+
+      // The panel, with real files from disk, given to the page the way a drop gives them
+      const clipDir = path.join(path.dirname(profile), 'clips'), sounds = path.join(profile, 'sounds');
+      fs.mkdirSync(clipDir, { recursive: true });
+      const tone = s => Array.from({ length: Math.round(SR * s) }, (_, i) => 0.3 * Math.sin(2 * Math.PI * 523 * i / SR));
+      writeWav(path.join(clipDir, 'Airhorn.wav'), tone(0.6));
+      writeWav(path.join(clipDir, 'Too long.wav'), new Array(SR * 125).fill(0));
+      fs.writeFileSync(path.join(clipDir, 'Broken.mp3'), crypto.randomBytes(4000));
+      fs.writeFileSync(path.join(clipDir, 'notes.txt'), 'not a sound');
+      const files = ['Airhorn.wav', 'Too long.wav', 'Broken.mp3', 'notes.txt'].map(f => path.join(clipDir, f));
+      const giveFiles = async () => {
+        await copy.call(() => { const i = document.createElement('input'); i.type = 'file'; i.multiple = true; i.id = 'testFiles'; i.hidden = true; document.body.append(i); });
+        const doc = await copy.cdp('DOM.getDocument');
+        const node = await copy.cdp('DOM.querySelector', { nodeId: doc.root.nodeId, selector: '#testFiles' });
+        await copy.cdp('DOM.setFileInputFiles', { nodeId: node.nodeId, files });
+      };
+      await giveFiles();
+      const p = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), out = {};
+        clearTimeout(startupRetryTimer); startupRetries = 99;
+        await dropSounds(document.getElementById('testFiles').files);
+        document.getElementById('testFiles').remove();
+        await wait(100);
+        out.names = state.board.map(c => c.name);
+        out.hint = document.getElementById('boardHint').textContent;
+        out.pads = document.querySelectorAll('.olive-pad').length;
+        const pad = document.querySelector('.olive-pad-play');
+        if (!pad) return out;
+        pad.click(); await wait(150);
+        out.playing = engine.clipsPlaying().length === 1 && !!document.querySelector('.olive-pad[data-playing]');
+        await wait(800);
+        out.endedPad = !document.querySelector('.olive-pad[data-playing]');
+        renameSound(state.board[0].id, 'Horn'); savePrefs();
+        out.saved = JSON.parse(localStorage.getItem(PREFS_KEY)).board;
+        return out;
+      });
+      const copied = fs.existsSync(sounds) ? fs.readdirSync(sounds) : [];
+      check('adding sounds keeps the good file and skips the rest, saying why', JSON.stringify(p.names) === '["Airhorn"]' && /Added 1 sound/.test(p.hint) && /Too long\.wav: longer than 2 minutes/.test(p.hint) && /Broken\.mp3: couldn't be played/.test(p.hint) && /notes\.txt: not a sound file/.test(p.hint), `${JSON.stringify(p.names)}; "${p.hint}"`);
+      check('Olive keeps its own copy, and only of the good file', copied.length === 1 && /^[a-f0-9]{16}\.wav$/.test(copied[0]), copied.join(', ') || 'none');
+      check('a pad plays its sound and lights up until it ends', p.pads === 1 && p.playing && p.endedPad, `pads ${p.pads}, playing ${p.playing}, unlit after ${p.endedPad}`);
+      check('the list is saved with the new name', Array.isArray(p.saved) && p.saved.length === 1 && p.saved[0].name === 'Horn' && p.saved[0].file === copied[0], JSON.stringify(p.saved));
+      // Hotkeys: chosen in the window, pressed for real through Windows (Ctrl+Alt+K plays it, Ctrl+Alt+J stops all)
+      const press = (code, ctrl = true, alt = true) => window.dispatchEvent(new KeyboardEvent('keydown', { code, key: code.replace(/^Key/, '').toLowerCase(), ctrlKey: ctrl, altKey: alt, bubbles: true }));
+      const k = await copy.call(async pressSrc => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), out = {}, press = eval(pressSrc), id = state.board[0].id;
+        startChoosingBoardKey(id); press('KeyK'); await wait(300);
+        out.key = state.board[0].key;
+        startChoosingBoardKey('stop'); press('KeyK'); await wait(300);     // taken by the sound: refused
+        out.refusedStop = state.boardStopKey; out.refusedHint = getView().boardKeyHint;
+        startChoosingBoardKey('stop'); press('KeyJ'); await wait(300);
+        out.stop = state.boardStopKey;
+        startChoosingBoardKey(id); press('Escape', false, false); await wait(300);   // Esc keeps the old one
+        out.afterEsc = state.board[0].key;
+        out.labels = ['Control+Alt+K', 'num7', 'numadd', 'Q', 'Up'].map(boardKeyLabel);
+        out.typing = ['Q', '1', 'Space', 'num7', 'F9', 'Control+Q', 'Home'].map(takesTypingKey);
+        out.failed = getView().boardKeyFailed;
+        const saved = JSON.parse(localStorage.getItem(PREFS_KEY));
+        out.saved = [saved.board[0].key, saved.boardStopKey];
+        return out;
+      }, press.toString());
+      check('a sound\'s hotkey and the stop-all hotkey are chosen and saved', k.key === 'Control+Alt+K' && k.stop === 'Control+Alt+J' && k.saved[0] === 'Control+Alt+K' && k.saved[1] === 'Control+Alt+J', `${k.key}, stop ${k.stop}, saved ${k.saved.join(' / ')}`);
+      check('a key that is already used is refused, and Esc keeps the old one', k.refusedStop === null && /already used by "Horn"/.test(k.refusedHint) && k.afterEsc === 'Control+Alt+K', `"${k.refusedHint}"; after Esc ${k.afterEsc}`);
+      check('keys read the way they look on the keyboard', JSON.stringify(k.labels) === '["Ctrl+Alt+K","Num 7","Num +","Q","↑"]', k.labels.join(', '));
+      check('a key alone that other apps type with is flagged, others are not', JSON.stringify(k.typing) === '[true,true,true,false,false,false,false]', JSON.stringify(k.typing));
+      // presses: playVk is the play key's virtual-key code; with mods it's pressed with Ctrl+Alt
+      const pressedPlays = async (playVk, mods) => {
+        if (mods) pressHotkey(0, playVk); else tapKey(playVk);
+        await sleep(250);
+        const on = await copy.call(() => engine.clipsPlaying().length);
+        pressHotkey(0, 0x4A); await sleep(250);
+        const off = await copy.call(() => engine.clipsPlaying().length);
+        return { on, off };
+      };
+      let single = null;
+      if (k.failed.length) console.log(`  SKIP  hotkey presses: another app holds ${k.failed.join(', ')}`);
+      else {
+        const hk = await pressedPlays(0x4B, true);
+        check('pressing the sound\'s hotkey anywhere plays it, the stop-all hotkey stops it', hk.on === 1 && hk.off === 0, `${hk.on} playing after Ctrl+Alt+K, ${hk.off} after Ctrl+Alt+J`);
+        // one button: Num 7 alone
+        single = await copy.call(async pressSrc => {
+          const press = eval(pressSrc);
+          startChoosingBoardKey(state.board[0].id); press('Numpad7', false, false); await new Promise(r => setTimeout(r, 300));
+          return { key: state.board[0].key, failed: getView().boardKeyFailed };
+        }, press.toString());
+        if (single.key !== 'num7' || single.failed.length) check('a single key (Num 7) can be a hotkey', false, `key ${single.key}, not registered: ${single.failed.join(', ')}`);
+        else {
+          const one = await pressedPlays(0x67, false);
+          check('a single key (Num 7) can be a hotkey, and pressing it plays the sound', one.on === 1 && one.off === 0, `${one.on} playing after Num 7, ${one.off} after Ctrl+Alt+J`);
+        }
+      }
+
+      // after a restart of the window: still there, and it plays
+      await copy.cdp('Page.reload', { ignoreCache: true });
+      await sleep(5000);
+      if (single && single.key === 'num7' && !single.failed.length) {
+        const hk = await pressedPlays(0x67, false);
+        check('after a restart the hotkeys work again', hk.on === 1 && hk.off === 0, `${hk.on} playing after Num 7, ${hk.off} after Ctrl+Alt+J`);
+      }
+      const r = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), out = {};
+        clearTimeout(startupRetryTimer); startupRetries = 99;
+        out.names = state.board.map(c => c.name);
+        playSound(state.board[0].id); await wait(100);
+        out.playing = engine.clipsPlaying().length === 1;
+        stopSounds();
+        removeSound(state.board[0].id); await wait(300);
+        out.after = state.board.length; out.saved = JSON.parse(localStorage.getItem(PREFS_KEY)).board.length;
+        return out;
+      });
+      check('after a restart the sound is still there and plays', JSON.stringify(r.names) === '["Horn"]' && r.playing, `${JSON.stringify(r.names)}, playing ${r.playing}`);
+      const left = fs.existsSync(sounds) ? fs.readdirSync(sounds) : [];
+      check('removing a sound deletes Olive\'s copy and forgets it', r.after === 0 && r.saved === 0 && left.length === 0, `${r.after} in the list, ${r.saved} saved, ${left.length} files left`);
     }
 
     if (wanted('nr')) console.log('\nNoise reduction slider');

@@ -1,5 +1,5 @@
-// Exposes a narrow bridge for Windows microphone volume/mute. Nothing else from Node reaches the page.
-const { contextBridge, ipcRenderer } = require('electron');
+// Exposes narrow bridges to the main process (Windows mic volume/mute, hotkeys, soundboard files...). Nothing else from Node reaches the page.
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('sysMic', {
   list: () => ipcRenderer.invoke('sysmic', 'list'),
@@ -41,4 +41,15 @@ contextBridge.exposeInMainWorld('appPtt', {
 contextBridge.exposeInMainWorld('appStartup', {
   get: () => ipcRenderer.invoke('startup:get'),
   set: on => ipcRenderer.invoke('startup:set', on === true)
+});
+
+// Soundboard: add sounds (a file dialog, or files dropped on the window), read Olive's copies back, remove them.
+contextBridge.exposeInMainWorld('appBoard', {
+  pick: () => ipcRenderer.invoke('board:pick'),
+  pathOf: file => { try { return webUtils.getPathForFile(file); } catch { return ''; } },   // one File at a time: a FileList doesn't cross the bridge
+  importPaths: paths => ipcRenderer.invoke('board:import', Array.isArray(paths) ? paths.map(String) : []),
+  read: file => ipcRenderer.invoke('board:read', String(file)),
+  remove: file => ipcRenderer.invoke('board:remove', String(file)),
+  setKeys: list => ipcRenderer.invoke('board:keys', Array.isArray(list) ? list.map(p => [String(p[0]), String(p[1])]) : []),
+  onKey: cb => { ipcRenderer.on('board:key', (event, id) => cb(String(id))); }
 });
