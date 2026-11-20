@@ -25,7 +25,7 @@ export {
 export { isCableLabel, updateSendStatus, updateSetup, setupDownload, setupCheck, setupFinished, setupShow } from './cable.js';
 export {
   addSounds, dropSounds, playSound, stopSounds, renameSound, setSoundVol, removeSound, selectSound,
-  setBoardVol, setBoardLocal, setBoardLocalVol, setBoardWhileMuted, BOARD_MAX_SECONDS, startChoosingBoardKey, clearBoardKey, boardKeyLabel
+  setBoardVol, setBoardLocal, setBoardLocalVol, setBoardWhileMuted, BOARD_MAX_SECONDS, startChoosingBoardKey, clearBoardKey, boardKeyLabel, takesTypingKey
 } from './board.js';
 export { setBadge, setBadgeCorner, pressUpdate, openReleaseNotes, setUpdateAuto, setStartup, setSettingsOpen, settingsReasons } from './app-settings.js';
 
