@@ -85,5 +85,6 @@ export const Icon = {
   micOff: <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5a2.5 2.5 0 0 0-2.5 2.5v5a2.5 2.5 0 0 0 5 0V5A2.5 2.5 0 0 0 10 2.5z"/><path d="M5 9.5a5 5 0 0 0 10 0M10 14.5v3"/><line x1="3" y1="3" x2="17" y2="17"/></svg>,
   headphones: <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 13v-2.5a6.5 6.5 0 0 1 13 0V13"/><rect x="2.5" y="12" width="3.5" height="5" rx="1.2"/><rect x="14" y="12" width="3.5" height="5" rx="1.2"/></svg>,
   play: <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="2.6" className="fill"/></svg>,
+  dots: <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="4.5" cy="10" r="1.4" className="fill"/><circle cx="10" cy="10" r="1.4" className="fill"/><circle cx="15.5" cy="10" r="1.4" className="fill"/></svg>,
   chevron: <svg viewBox="0 0 20 20" aria-hidden="true"><polyline points="7.5 4.5 13 10 7.5 15.5"/></svg>
 };

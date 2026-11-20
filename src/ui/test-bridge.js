@@ -10,6 +10,7 @@ import { checkUpdates, setSettingsOpen } from './app-settings.js';
 import { syncTicker, meterTestVars } from './meters.js';
 import { selectBand, setEqOpen, eqEdited, applyEq, eqTestHooks } from './eq.js';
 import { updateSetup, isCableLabel, cableTestVars } from './cable.js';
+import { dropSounds, playSound, stopSounds, renameSound, setSoundVol, removeSound, selectSound, startChoosingBoardKey } from './board.js';
 import {
   muteSound, unmuteSound, sysApi, toggleMute, setMonitor, setSendWanted, loadDevices, selectDevice,
   applyNr, updateGate, setMutedUi, loadOutputs, currentDevice, updateHints, storeTestVars
@@ -33,6 +34,7 @@ const testGlobals = {
   syncEqUi: () => applyEq(),
   eqPoint: eqTestHooks.eqPoint,
   setView: p => ui(p),
+  dropSounds, playSound, stopSounds, renameSound, setSoundVol, removeSound, selectSound, startChoosingBoardKey, getView,
   // The settings live in a drawer that only exists while open: these open it (resolving once it's on screen) and close it.
   openSettings: () => new Promise(resolve => {
     setSettingsOpen(true);

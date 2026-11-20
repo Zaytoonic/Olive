@@ -234,3 +234,26 @@ body {
 /* Like the old window: numbered setup steps, and section titles as small capitals beside the card. */
 .olive-steps { list-style: decimal; }
 .olive-section-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 8px 16px; }
+
+/* ---- Soundboard ---- */
+.olive-board { padding: 12px 0; display: flex; flex-direction: column; gap: 10px; border-radius: 10px; }
+.olive-board[data-dragging] { outline: 2px dashed var(--olive-light); outline-offset: 4px; }
+.olive-board-empty { border: 1px dashed var(--hairline); border-radius: 10px; padding: 18px; text-align: center; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.olive-pads { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+.olive-pad { position: relative; display: flex; align-items: stretch; background: var(--surface-secondary); border-radius: 10px; min-height: 56px; overflow: hidden; }
+.olive-pad-play { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; padding: 8px 4px 8px 12px;
+  background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.olive-pad-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.olive-pad-vol { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.olive-pad-edit { flex: none; width: 30px; display: grid; place-items: center; background: none; border: 0; color: var(--text-2); cursor: pointer; }
+.olive-pad-play:hover, .olive-pad-edit:hover { background: var(--surface-tertiary); }
+.olive-pad-play:focus-visible, .olive-pad-edit:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 10px; }
+.olive-pad[data-playing] { background: var(--olive); color: #fff; }
+.olive-pad[data-playing] .olive-pad-vol, .olive-pad[data-playing] .olive-pad-edit { color: rgba(255, 255, 255, 0.8); }
+.olive-pad[data-playing] .olive-pad-play:hover, .olive-pad[data-playing] .olive-pad-edit:hover { background: rgba(255, 255, 255, 0.12); }
+.olive-pad[data-editing] { box-shadow: inset 0 0 0 2px var(--olive-light); }
+.olive-pad[data-failed] .olive-pad-name { color: var(--danger); text-decoration: line-through; }
+.olive-pad-editor { background: var(--surface-secondary); border-radius: 10px; padding: 10px 12px 0; }
+.olive-pad-editor .olive-row { padding-bottom: 6px; }
+.olive-pad-input { flex: 1; min-width: 0; max-width: 320px; background: var(--surface-tertiary); border: 1px solid var(--hairline); border-radius: 8px; padding: 6px 10px; font-size: 14px; }
+.olive-pad-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }

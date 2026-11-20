@@ -54,7 +54,7 @@ export function setMuteHotkeyOn(on) { state.muteHotkey = on; applyMuteHotkey(); 
 // Changing the shortcut: the next key combination pressed in this window becomes it.
 // The old one is released while choosing, otherwise pressing it again would never reach this window.
 export let hotkeyChoosing = false;
-function hotkeyFromEvent(e) {
+export function hotkeyFromEvent(e) {
   const letter = /^Key([A-Z])$/.exec(e.code), digit = /^Digit(\d)$/.exec(e.code), fn = /^F(?:[1-9]|1\d|2[0-4])$/.test(e.code);
   const key = letter ? letter[1] : digit ? digit[1] : fn ? e.code : null;
   if (!key) return null;
