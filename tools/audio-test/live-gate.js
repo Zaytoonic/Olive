@@ -16,7 +16,16 @@ const profile = path.join(process.env.LOCALAPPDATA || path.join(root, 'dist'), '
 const PORT = 9362, KEY = 'olive.settings.v1', sleep = ms => new Promise(r => setTimeout(r, ms));
 const SAFE = { send: false, muteHotkey: false, ptt: false, badge: false, updateAuto: false, setupDone: true };
 const fake = process.argv.includes('--fake');              // a dry run on Chromium's fake mic, to check this script itself
-const PHASES = [                                           // [name, seconds, what the window says]
+// --loud: shorter talking, then laughing and loud talking, to see whether the voice score lets those through.
+// It also saves each frame's numbers (voice score, level, peak; no sound) next to the check's profile, to try rules on.
+const loudRun = process.argv.includes('--loud');
+const PHASES = loudRun ? [                                 // [name, seconds, what the window says]
+  ['ready', 6, 'Get ready. Next: stay quiet'],
+  ['quiet', 15, 'Stay quiet. Desk sounds are fine'],
+  ['talk', 30, 'Talk normally, the way you do on Discord'],
+  ['loud', 40, 'Laugh, cheer, say things loudly, like when something happens in a game'],
+  ['quiet2', 15, 'Stay quiet again. Desk sounds are fine'],
+] : [
   ['ready', 6, 'Get ready. Next: stay quiet'],
   ['quiet', 15, 'Stay quiet. Desk sounds are fine'],
   ['talk', 75, 'Talk normally, the way you do on Discord'],
@@ -73,8 +82,10 @@ const probe = phases => `(async () => {
   if (!st.deviceId) throw new Error('the copy has no mic');
   let src = await (await fetch('app://local/voice-worklet.js')).text();
   const swap = (a, b) => { if (src.split(a).length !== 2) throw new Error('voice-worklet.js changed: ' + a); src = src.replace(a, b); };
-  swap('ch.input[ch.filled++] = x;', 'ch.input[ch.filled++] = x; if (c === 0) this.ss = (this.ss || 0) + x * x;');
-  swap('this.frameVoice = voice;', 'this.frameVoice = voice; this.port.postMessage([voice, Math.sqrt((this.ss || 0) / FRAME)]); this.ss = 0;');
+  swap('ch.input[ch.filled++] = x;', 'ch.input[ch.filled++] = x; if (c === 0) { this.ss = (this.ss || 0) + x * x; this.pk = Math.max(this.pk || 0, Math.abs(x)); }');
+  swap('this.frameVoice = voice;', 'this.frameVoice = voice; this.port.postMessage([voice, Math.sqrt((this.ss || 0) / FRAME), this.pk || 0, Math.sqrt((this.ws || 0) / FRAME)]); this.ss = 0; this.pk = 0; this.ws = 0;');
+  // the cleaned audio (noise reduction at 100%, before the gate), to see how much of each sound the network keeps
+  swap('const wet = ch.wet[ch.wetRead];', 'const wet = ch.wet[ch.wetRead]; if (c === 0) this.ws = (this.ws || 0) + wet * wet;');
   swap("registerProcessor('voice-cleanup'", "registerProcessor('voice-probe'");
   const ctx = new AudioContext({ sampleRate: 48000 });
   await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
@@ -84,9 +95,19 @@ const probe = phases => `(async () => {
   const sink = ctx.createGain(); sink.gain.value = 0;
   ctx.createMediaStreamSource(s).connect(node); node.connect(sink); sink.connect(ctx.destination);
   await ctx.resume();
-  const phases = ${JSON.stringify(phases)}, frames = [];
+  const phases = ${JSON.stringify(phases)}, frames = [], outPeaks = [];
   let phase = 0, left = phases[0][1];
-  node.port.onmessage = e => { if (Array.isArray(e.data)) frames.push([phase, +e.data[0].toFixed(3), +e.data[1].toExponential(3)]); };
+  // The copy's own chain, with your EQ, volume and compressor setting: the peak of what leaves it, every 10 ms.
+  // Above 1.0 (0 dBFS) the sound is clipped on its way to Listen and the cable.
+  const ec = window.engine && window.engine.mainChain;
+  if (ec) {
+    const meterSrc = 'registerProcessor("olive-peak", class extends AudioWorkletProcessor { constructor() { super(); this.pk = 0; this.n = 0; } process(i) { const ch = i[0] || []; for (const d of ch) for (let k = 0; k < d.length; k++) { const a = Math.abs(d[k]); if (a > this.pk) this.pk = a; } this.n += 128; if (this.n >= sampleRate / 100) { this.port.postMessage(this.pk); this.pk = 0; this.n = 0; } return true; } });';
+    await ec.ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([meterSrc], { type: 'text/javascript' })));
+    const pm = new AudioWorkletNode(ec.ctx, 'olive-peak', { numberOfInputs: 1, numberOfOutputs: 0 });
+    ec.gateGain.connect(pm);
+    pm.port.onmessage = e => outPeaks.push([phase, +e.data.toFixed(4)]);
+  }
+  node.port.onmessage = e => { if (Array.isArray(e.data)) frames.push([phase, +e.data[0].toFixed(3), +e.data[1].toExponential(3), +e.data[2].toFixed(4), +e.data[3].toExponential(3)]); };
   const box = document.createElement('div');
   box.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(12,12,10,.94);color:#f5f4f0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;font:600 28px system-ui;text-align:center;padding:24px';
   const say = document.createElement('div'), count = document.createElement('div'), note = document.createElement('div');
@@ -96,7 +117,7 @@ const probe = phases => `(async () => {
   box.append(say, count, note); document.body.append(box);
   const draw = () => { say.textContent = phases[phase][2]; count.textContent = Math.ceil(left); };
   draw();
-  window.__gate = { frames, done: false, mic: s.getAudioTracks()[0].label };
+  window.__gate = { frames, outPeaks, chain: !!ec, done: false, mic: s.getAudioTracks()[0].label };
   const t0 = performance.now(); let at = 0;
   const tick = setInterval(() => {
     const el = (performance.now() - t0) / 1000;
@@ -138,6 +159,22 @@ function report(frames, mic) {
     const shut = ph => { const at = frames.map((f, i) => f[0] === idx(ph) ? i : -1).filter(i => i >= 0); return pct(at.filter(i => open[i]).length, at.length); };
     lines.push(`${name === 'old' ? "Olive's rule (0.8)       " : 'Hold variant (keep 0.5)  '}  speech kept: ${kept(voiced)} (first 30 s ${kept(early)}, after ${kept(late)})  ·  cut mid-speech: ${cuts}x  ·  open in quiet: ${shut('quiet')} before, ${shut('quiet2')} after`);
   }
+  if (idx('loud') >= 0) {                                  // laughing and loud talking: the sound above the talking level
+    const talkLevel = median(voiced.map(i => dB(frames[i][2])));
+    const loudAt = frames.map((f, i) => f[0] === idx('loud') && dB(f[2]) > loud ? i : -1).filter(i => i >= 0);
+    const louder = loudAt.filter(i => dB(frames[i][2]) > talkLevel + 6);
+    const clipped = loudAt.filter(i => frames[i][3] >= 0.99).length;
+    lines.push('', `Laughing / loud (normal talking sits at ${talkLevel.toFixed(1)} dB):`, `  all sound: ${band(loudAt)}`, `  6 dB+ louder than your talking: ${band(louder)}`);
+    lines.push(`  kept by Olive's rule: all sound ${pct(loudAt.filter(i => rules.old[i]).length, loudAt.length)}, the louder part ${pct(louder.filter(i => rules.old[i]).length, louder.length)}  ·  frames hitting full scale (clipping): ${clipped}`);
+    // Noise reduction at 100%: the cleaned audio's level against the mic's, over each sound (cleaned audio is 3 frames late)
+    const kept = list => {
+      const ok = list.filter(i => frames[i + 3] && frames[i + 3][4] !== undefined);
+      if (!ok.length) return 'n/a';
+      const ch = ok.map(i => dB(frames[i + 3][4]) - dB(frames[i][2])).sort((a, b) => a - b), q = p => ch[Math.floor(p * (ch.length - 1))];
+      return `median ${q(0.5).toFixed(1)} dB, 1 in 4 frames ${q(0.25).toFixed(1)} dB or lower, 1 in 10 ${q(0.1).toFixed(1)} dB or lower`;
+    };
+    lines.push('', 'Noise reduction at 100% (how much quieter the cleaned audio is than the mic):', `  normal talking: ${kept(voiced)}`, `  laughing / loud: ${kept(loudAt)}`, `  the louder part: ${kept(louder)}`);
+  }
   return lines.join('\n');
 }
 
@@ -159,13 +196,32 @@ function report(frames, mic) {
     await p.call('Page.reload', { ignoreCache: true });
     await sleep(5000);
     const mic = await p.run(probe(PHASES));
-    console.log(`Running on ${mic}. Follow the window: quiet, talk, quiet (about 2 minutes).`);
+    console.log(`Running on ${mic}. Follow the window: ${PHASES.slice(1).map(ph => ph[0].replace(/\d$/, '')).join(', ')} (about 2 minutes).`);
     const total = PHASES.reduce((a, ph) => a + ph[1], 0);
     for (let i = 0; i < total + 30 && !(await p.run('window.__gate.done')); i++) await sleep(1000);
     const frames = await p.run('window.__gate.frames');
+    const outPeaks = await p.run('window.__gate.outPeaks') || [];
     await sleep(1500);
     p.ws.close();
     console.log('\n' + report(frames, mic));
+    if (loudRun) {
+      if (!outPeaks.length) console.log("\nOlive's chain output: couldn't be measured (the copy's chain wasn't running)");
+      else {
+        console.log("\nOlive's chain output, with your EQ, volume and compressor (above 0 dB is clipped):");
+        PHASES.forEach(([name], ph) => {
+          if (name === 'ready') return;
+          const pk = outPeaks.filter(x => x[0] === ph).map(x => x[1]);
+          if (!pk.length) return;
+          const max = Math.max(...pk), over = pk.filter(x => x >= 1).length;
+          console.log(`  ${name.padEnd(7)} loudest ${dB(max).toFixed(1)} dB  ·  10 ms blocks clipped: ${over} of ${pk.length} (${pct(over, pk.length)})`);
+        });
+      }
+    }
+    if (loudRun && !fake) {
+      const file = path.join(profile, `frames-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`);
+      fs.writeFileSync(file, JSON.stringify({ phases: PHASES.map(p => p[0]), columns: ['phase', 'voice', 'rms', 'peak', 'cleanedRms'], frames, outPeaks }));
+      console.log(`\nFrame numbers saved (no sound): ${file}`);
+    }
   } finally {
     kill(app.pid);
     if (fake) { await sleep(1500); try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* still closing */ } }
