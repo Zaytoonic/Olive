@@ -13,7 +13,7 @@
 ## Features
 <img src="docs/settings.png" align="right" width="300" alt="The Settings panel">
 
-- **Voice cleanup:** RNNoise noise reduction (the 2025 model) with adjustable strength, and a noise gate that opens only when it hears your voice.
+- **Voice cleanup:** RNNoise noise reduction with adjustable strength, and a noise gate that opens only when it hears your voice.
 - **Compressor** to even out your volume.
 - **Six-band EQ** with a low cut and presets, saved separately for each mic, and a hold-to-compare button.
 - **Send to Discord or other apps** through [VB-Audio Virtual Cable](https://vb-audio.com/Cable/).
@@ -103,11 +103,11 @@ src/renderer/    what the window page loads
   gate-worklet.js  volume gate, for a gate set by hand or as the fallback
   nr-worklet.js    fallback noise reduction, if the voice engine can't start
   recorder-worklet.js  records the mic test
-  vendor/          RNNoise (xiph, Feb 2025 model) compiled to WebAssembly, from @shiguredo/rnnoise-wasm 2025.1.5
+  vendor/          RNNoise (xiph, v0.2 from April 2024) compiled to WebAssembly by tools/build-rnnoise.js
 assets/          icons and mute sounds, both made from code (tools/make-icons.js, tools/make-sounds.js)
 docs/            the screenshots above
 CHANGELOG.md     what changed in each release
-tools/           build, packaging, signing, icon and sound scripts
+tools/           build, packaging, signing, icon and sound scripts; build-rnnoise.js rebuilds vendor/rnnoise.wasm
   audio-test/      npm run test:audio
   installer/       the installer and uninstaller source, and npm run test:installer
 ```
@@ -115,4 +115,4 @@ tools/           build, packaging, signing, icon and sound scripts
 The palette and icon are described in [DESIGN.md](DESIGN.md).
 
 ## Licence
-Olive is released under the [MIT licence](LICENSE): you can use, change and share it, as long as the copyright notice stays with it. The bundled RNNoise build in `src/renderer/vendor` keeps its own licences (RNNoise: BSD; the WebAssembly build: Apache-2.0), in `rnnoise-LICENSE.txt`.
+Olive is released under the [MIT licence](LICENSE): you can use, change and share it, as long as the copyright notice stays with it. The bundled RNNoise build in `src/renderer/vendor` keeps its own BSD licence, in `rnnoise-LICENSE.txt`.

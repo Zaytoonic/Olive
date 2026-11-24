@@ -6,12 +6,20 @@
 //   the last voice, and because the network's audio lags its detection by a frame, it is already open when a word starts.
 // RNNoise only works at 48 kHz, and needs samples scaled to 16-bit range. At other rates audio passes through unchanged.
 //
-// The network is vendor/rnnoise.wasm: xiph's RNNoise at commit 70f1d256 (Feb 2025) with its official model 0a8755f8,
-// compiled by @shiguredo/rnnoise-wasm 2025.1.5. That package's own loader can't run in an AudioWorklet, so the page
-// compiles the wasm and passes it in processorOptions.wasm, and startRnnoise below starts it. It asks for only these imports.
+// The network is vendor/rnnoise.wasm: xiph's RNNoise at tag v0.2 (14 April 2024) with its model 0b50c45, built by
+// tools/build-rnnoise.js. The later weights (Aug 2024 - Jan 2025) treated laughs and parts of words as noise.
+// The page compiles the wasm and passes it in processorOptions.wasm, and startRnnoise below starts it. It also starts
+// the previous build (Emscripten, from @shiguredo/rnnoise-wasm), so an older wasm still works.
 function startRnnoise(module) {
   let memory = null;
-  const { exports } = new WebAssembly.Instance(module, {
+  const fdWrite = (fd, iov, count, written) => {         // RNNoise doesn't print; this only reports the bytes as taken
+    const u32 = new Uint32Array(memory.buffer);
+    let n = 0;
+    for (let i = 0; i < count; i++) n += u32[(iov >>> 2) + i * 2 + 1];
+    u32[written >>> 2] = n;
+    return 0;
+  };
+  const known = {
     env: {
       __assert_fail: () => { throw new Error('RNNoise assertion failed'); },
       emscripten_resize_heap: size => {
@@ -19,19 +27,18 @@ function startRnnoise(module) {
         try { memory.grow(pages); return 1; } catch { return 0; }
       }
     },
-    wasi_snapshot_preview1: {
-      fd_write: (fd, iov, count, written) => {         // RNNoise doesn't print; this only reports the bytes as taken
-        const u32 = new Uint32Array(memory.buffer);
-        let n = 0;
-        for (let i = 0; i < count; i++) n += u32[(iov >>> 2) + i * 2 + 1];
-        u32[written >>> 2] = n;
-        return 0;
-      }
-    }
-  });
+    wasi_snapshot_preview1: { fd_write: fdWrite, proc_exit: () => { throw new Error('RNNoise exited'); } }
+  };
+  // Any other import is stdio or the environment, which RNNoise never calls: answered with 0 (success, nothing done).
+  const imports = {};
+  for (const { module: m, name, kind } of WebAssembly.Module.imports(module)) {
+    if (kind !== 'function') continue;
+    (imports[m] = imports[m] || {})[name] = (known[m] && known[m][name]) || (() => 0);
+  }
+  const { exports } = new WebAssembly.Instance(module, imports);
   memory = exports.memory;
-  exports.emscripten_stack_init();
-  exports.__wasm_call_ctors();
+  if (exports._initialize) exports._initialize();         // a reactor (tools/build-rnnoise.js)
+  else { exports.emscripten_stack_init(); exports.__wasm_call_ctors(); }   // the Emscripten build
   if (exports.rnnoise_get_frame_size() !== FRAME) throw new Error('unexpected RNNoise frame size');
   return {
     create: () => exports.rnnoise_create(0),           // 0: the built-in model
