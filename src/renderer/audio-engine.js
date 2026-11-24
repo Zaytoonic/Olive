@@ -379,7 +379,7 @@ const engine = (() => {
   function detachCleanup(ch) {
     const node = ch.nr;
     ch.nr = null; ch.voice = null; ch.dfn = null;
-    if (node) { try { node.disconnect(); } catch {} }
+    if (node) { try { node.disconnect(); } catch {} stopNode(node); }
     connectHead(ch, ch.hp);
     routeChain(ch);
   }
@@ -410,10 +410,13 @@ const engine = (() => {
       console.warn('Noise reduction unavailable:', err && err.message);
     }
   }
+  // Tells a taken-out worklet to stop: otherwise it keeps running on silence (measured: each one switched away kept costing CPU).
+  function stopNode(node) { try { node.port.postMessage('stop'); } catch {} }
   function detachNr(ch) {
     const node = ch.nr; if (!node) return;
     ch.nr = null;
     try { node.disconnect(); } catch {}
+    stopNode(node);
     connectHead(ch, ch.hp);
   }
   function connectHead(ch, next) {

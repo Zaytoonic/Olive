@@ -30,9 +30,12 @@ class DeepFilterCleanup extends AudioWorkletProcessor {
     this.cur = new Float32Array(FRAME);                  // the cleaned frame being played; starts as a frame of silence
     this.pos = 0;
     this.port.postMessage({ supported: this.supported, ready: true });
+    // A processor that returns true keeps running even once nothing is connected to it; the engine sends 'stop' when it takes one out.
+    this.port.onmessage = e => { if (e.data === 'stop') this.stopped = true; };
   }
 
   process(inputs, outputs, parameters) {
+    if (this.stopped) return false;
     const input = inputs[0], output = outputs[0];
     if (!output || !output.length) return true;
     const src = input && input.length ? input : null;
