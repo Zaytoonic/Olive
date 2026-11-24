@@ -2,6 +2,11 @@
 
 What changed in each release of Olive. Downloads are on the [Releases](https://github.com/Zaytoonic/Olive/releases) page.
 
+## 1.8.1 (24 November 2026)
+
+- Noise reduction goes back to RNNoise's April 2024 model. The 2025 model treated some laughs and parts of words as noise and cut them; the older one let 98.5% of normal talking through the gate on a laptop mic, against 62-88% before, and stays shut when you're quiet.
+- It also removes more of a gusty fan's noise and uses about 30% less CPU.
+
 ## 1.8.0 (20 November 2026)
 
 - A soundboard: add sound files (MP3, WAV, OGG, FLAC, M4A, up to 2 minutes), then play them to Discord on top of your voice with a click or a hotkey that works from anywhere, even in a game. A hotkey can be any key, even a single one like Num 1. Each sound has its own volume and name, and there's a Stop all button and hotkey.
