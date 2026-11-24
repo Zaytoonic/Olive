@@ -27,7 +27,10 @@
 
 <br clear="right">
 
-## What's new in 1.8.0
+## What's new in 1.8.1
+- **Noise reduction that keeps your voice.** Olive goes back to RNNoise's April 2024 model: the 2025 one treated some laughs and parts of words as noise. It also removes more of a gusty fan and uses about 30% less CPU.
+
+### And in 1.8.0
 ![The soundboard](docs/soundboard.png)
 
 - **A soundboard.** Add sound files (MP3, WAV, OGG, FLAC or M4A, up to 2 minutes), then click one to play it. Discord hears it over your voice.
