@@ -18,7 +18,7 @@ export function App() {
           <div className="olive-columns">
             <div className="olive-col">
               <Section title="Microphone"><Volume /><Gate /></Section>
-              <Section title="Processing"><NoiseReduction /><Compressor /></Section>
+              <Section title="Processing"><NoiseReduction /><HighQuality /><Compressor /></Section>
             </div>
             <div className="olive-col">
               <Section title="Output"><Send /><Mono /><Monitoring /><OutputDevice /></Section>
@@ -185,6 +185,12 @@ function NoiseReduction() {
       <Level label="Noise reduction strength" value={amount} onChange={S.setNrAmount} isDisabled={!on} />
     </Row>
   );
+}
+// Trial: DeepFilterNet3 in place of RNNoise.
+function HighQuality() {
+  const on = useV(v => v.st.nrEngine === 'deepfilter'), nr = useV(v => v.st.nr), hint = useV(v => v.hqHint);
+  return <Row title="High quality noise reduction (trial)" hint={hint}
+    end={<Toggle label="High quality noise reduction" title="DeepFilterNet3: a more natural voice, about twice the CPU" isSelected={on} onChange={S.setHighQuality} isDisabled={!nr} />} />;
 }
 
 function Compressor() {

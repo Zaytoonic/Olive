@@ -22,13 +22,19 @@ const WORKLETS = {
   '/nr-worklet.js': path.join(RENDERER, 'nr-worklet.js'),
   '/voice-worklet.js': path.join(RENDERER, 'voice-worklet.js'),
   '/recorder-worklet.js': path.join(RENDERER, 'recorder-worklet.js'),
-  '/rnnoise.wasm': path.join(RENDERER, 'vendor', 'rnnoise.wasm')
+  '/rnnoise.wasm': path.join(RENDERER, 'vendor', 'rnnoise.wasm'),
+  // DeepFilterNet3, the "High quality" noise reduction trial: the worklet imports the polyfill and the glue as ./ modules
+  '/deepfilter-worklet.js': path.join(RENDERER, 'deepfilter-worklet.js'),
+  '/dfn-polyfill.js': path.join(RENDERER, 'dfn-polyfill.js'),
+  '/df.js': path.join(RENDERER, 'vendor', 'deepfilter', 'df.js'),
+  '/df_bg.wasm': path.join(RENDERER, 'vendor', 'deepfilter', 'df_bg.wasm'),
+  '/DeepFilterNet3_onnx.tar.gz': path.join(RENDERER, 'vendor', 'deepfilter', 'DeepFilterNet3_onnx.tar.gz')
 };
 function serveWorklet(request) {
   const url = new URL(request.url);
   const file = url.host === 'local' ? WORKLETS[url.pathname] : undefined;
   if (!file) return new Response('Not found', { status: 404 });
-  const type = file.endsWith('.wasm') ? 'application/wasm' : 'text/javascript';
+  const type = file.endsWith('.wasm') ? 'application/wasm' : file.endsWith('.gz') ? 'application/gzip' : 'text/javascript';
   return fs.promises.readFile(file)
     .then(data => new Response(data, { headers: { 'content-type': type, 'access-control-allow-origin': '*' } }))
     .catch(() => new Response('Not found', { status: 404 }));

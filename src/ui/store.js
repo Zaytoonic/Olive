@@ -73,6 +73,8 @@ export function setGateDb(v) { state.gateDb = v; updateGate(); scheduleSave(); }
 export function setGateAuto(on) { state.gateAuto = on; updateGate(); savePrefs(); }
 export function setNr(on) { state.nr = on; applyNr(); updateHints(); savePrefs(); }
 export function setNrAmount(v) { state.nrAmount = v; applyNr(); updateHints(); scheduleSave(); }
+// The "High quality" trial: DeepFilterNet3 instead of RNNoise (audio-engine.js switches the chains over).
+export function setHighQuality(on) { state.nrEngine = on ? 'deepfilter' : 'rnnoise'; engine.set({ nrEngine: state.nrEngine }); updateHints(); savePrefs(); }
 export function setMono(on) { state.mono = on; applyMono(); savePrefs(); }
 export function setSendWanted(on) { pref.send = on; savePrefs(); setSend(on); }
 export function setMonitorVol(v) { state.monitorVol = v; engine.set({ monitorVol: v }); updateHints(); scheduleSave(); }
@@ -163,7 +165,12 @@ export function updateHints() {
     nrHint: !state.nr ? 'Off: nothing is removed'
       : st.nrFailed ? 'Unavailable: the noise reduction engine could not start'
       : st.voiceFailed ? "Using the backup noise reduction: the voice engine couldn't start"
+      : st.engine === 'deepfilter' ? `High quality: nothing is turned down more than ${state.nrAmount >= 100 ? 'it takes' : Math.round(state.nrAmount * 0.3) + ' dB'}. Lower it so laughs can only be ducked, never cut`
       : 'Lowers fans, rumble and hiss. Turn it down to mix your natural sound back in',
+    hqHint: state.nrEngine !== 'deepfilter' ? 'Off: the standard engine (RNNoise)'
+      : st.dfnFailed ? "Couldn't start, so the standard engine is running"
+      : st.engine === 'deepfilter' ? 'On: DeepFilterNet3 keeps your voice more natural. Uses about twice the CPU, and the gate follows your volume'
+      : 'Starting…',
     monHint: !state.monitor ? "You won't hear yourself" : engine.capturing ? 'Use headphones to avoid echo' : 'On · microphone not open, nothing to play',
     ...(engine.micTest ? {} : { testDisabled: !engine.capturing })
   });
@@ -414,7 +421,7 @@ export function start() {
   engine.set({
     inputGain: volFactor(), gateDb: state.gateDb, gateAuto: state.gateAuto, nr: state.nr, nrAmount: state.nrAmount, mono: state.mono,
     comp: state.comp, compAmount: state.compAmount, eq, monitor: state.monitor, monitorVol: state.monitorVol,
-    talking: talking(), talkFade: talkFade(), send: state.send, ...boardEngineCfg()
+    talking: talking(), talkFade: talkFade(), send: state.send, nrEngine: state.nrEngine, ...boardEngineCfg()
   });
   engine.init(EQ_BANDS);
   initBoard();

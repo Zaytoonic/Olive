@@ -10,7 +10,8 @@ const engine = (() => {
   const cfg = {
     inputGain: 1, gateDb: -45, gateAuto: true, nr: true, nrAmount: 100, mono: false, comp: false, compAmount: 50,
     eq: null, eqBypass: false, monitor: false, monitorVol: 80, talking: true, talkFade: 0.02, send: false,
-    boardVol: 0.8, boardLocal: true, boardLocalVol: 0.8, boardWhileMuted: true
+    boardVol: 0.8, boardLocal: true, boardLocalVol: 0.8, boardWhileMuted: true,
+    nrEngine: 'rnnoise'      // or 'deepfilter': DeepFilterNet3, the "High quality" trial (deepfilter-worklet.js)
   };
   let bands = [];                                // the EQ's bands: { key, type, freq, q }, in order
   let listener = () => {};
@@ -183,6 +184,7 @@ const engine = (() => {
     if (has('mono')) chains().forEach(applyMonoTo);
     if (has('comp') || has('compAmount')) chains().forEach(applyCompTo);
     if (has('nr') || has('nrAmount')) applyNr();
+    if (has('nrEngine')) chains().forEach(switchEngine);
     if (has('gateDb') || has('gateAuto')) applyGate();
     if (has('eq') || has('eqBypass')) chains().forEach(applyEqTo);
     if (has('monitor')) syncChains();
@@ -213,7 +215,9 @@ const engine = (() => {
     const all = chains();
     return {
       gateFailed: all.some(ch => ch.gateFailed), voiceFailed: all.some(ch => ch.voiceFailed), nrFailed: all.some(ch => ch.nrFailed),
-      voiceGate: !!(mainChain && mainChain.voice)       // a voice gate has no volume threshold
+      voiceGate: !!(mainChain && mainChain.voice),      // a voice gate has no volume threshold
+      engine: mainChain && mainChain.dfn ? 'deepfilter' : mainChain && mainChain.voice ? 'rnnoise' : 'fallback',
+      dfnFailed: all.some(ch => ch.dfnFailed)
     };
   }
 
@@ -318,6 +322,7 @@ const engine = (() => {
     return rnnoiseWasm;
   }
   async function attachVoice(ch) {
+    if (cfg.nrEngine === 'deepfilter' && !ch.dfnFailed) return attachDeepFilter(ch);
     try {
       if (ch.ctx.sampleRate !== 48000) throw new Error('needs 48 kHz, got ' + ch.ctx.sampleRate);
       const [wasm] = await Promise.all([loadRnnoise(), ch.ctx.audioWorklet.addModule(VOICE_WORKLET_URL)]);
@@ -338,6 +343,54 @@ const engine = (() => {
       changed();
     }
   }
+  // ---- DeepFilterNet3: the "High quality" trial ----
+  // In place of RNNoise. It has no voice detector, so ch.voice stays empty and the level gate gates after it.
+  // If it can't load or crashes, the chain goes back to RNNoise.
+  const DFN_WORKLET_URL = 'app://local/deepfilter-worklet.js', DFN_WASM_URL = 'app://local/df_bg.wasm', DFN_MODEL_URL = 'app://local/DeepFilterNet3_onnx.tar.gz';
+  let dfnFiles = null;
+  function loadDeepFilter() {
+    if (!dfnFiles) {
+      const get = url => fetch(url).then(r => { if (!r.ok) throw new Error(url + ': ' + r.status); return r.arrayBuffer(); });
+      dfnFiles = Promise.all([get(DFN_WASM_URL).then(b => WebAssembly.compile(b)), get(DFN_MODEL_URL)]);
+      dfnFiles.catch(() => { dfnFiles = null; });
+    }
+    return dfnFiles;
+  }
+  async function attachDeepFilter(ch) {
+    try {
+      if (ch.ctx.sampleRate !== 48000) throw new Error('needs 48 kHz, got ' + ch.ctx.sampleRate);
+      const [[wasm, model]] = await Promise.all([loadDeepFilter(), ch.ctx.audioWorklet.addModule(DFN_WORKLET_URL)]);
+      if (ch.ctx.state === 'closed' || cfg.nrEngine !== 'deepfilter') { if (ch.ctx.state !== 'closed' && !ch.nr) attachVoice(ch); return; }
+      const node = new AudioWorkletNode(ch.ctx, 'deepfilter-cleanup', { numberOfInputs: 1, numberOfOutputs: 1, processorOptions: { wasm, model: model.slice(0) }, parameterData: { strength: nrStrengthNow() } });
+      node.onprocessorerror = () => { console.warn('DeepFilterNet crashed; back to RNNoise'); ch.dfnFailed = true; detachCleanup(ch); attachVoice(ch); changed(); };
+      ch.nr = node; ch.dfn = node; ch.voice = null;
+      connectHead(ch, node);
+      node.connect(ch.hp);
+      routeChain(ch);
+      changed();
+    } catch (err) {
+      console.warn('DeepFilterNet unavailable, using RNNoise:', err && err.message);
+      ch.dfnFailed = true;
+      attachVoice(ch);
+      changed();
+    }
+  }
+  // Takes out whichever noise reduction the chain has (RNNoise, DeepFilterNet or the fallback).
+  function detachCleanup(ch) {
+    const node = ch.nr;
+    ch.nr = null; ch.voice = null; ch.dfn = null;
+    if (node) { try { node.disconnect(); } catch {} }
+    connectHead(ch, ch.hp);
+    routeChain(ch);
+  }
+  function switchEngine(ch) {
+    const want = cfg.nrEngine === 'deepfilter' && !ch.dfnFailed;
+    if (want === !!ch.dfn && ch.nr) return;
+    detachCleanup(ch);
+    ch.voiceFailed = false;
+    attachVoice(ch);
+  }
+
   // ---- Fallback noise reduction ----
   // nr-worklet.js on the raw mic, if the voice engine can't run. Strength never rebuilds anything, so moving the slider doesn't interrupt the audio.
   async function attachNr(ch) {

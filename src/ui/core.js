@@ -14,6 +14,7 @@ export const state = {
   nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: false, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M', eqOpen: false,
   ptt: false, pttKey: null, outputId: 'default', outputName: null, setupDone: false, updateAuto: true,
   muteSounds: true, muteSoundVol: 100, badge: true, badgeCorner: 'top-left',
+  nrEngine: 'rnnoise',     // or 'deepfilter': the "High quality" trial
   board: [], boardVol: 80, boardLocal: true, boardLocalVol: 80, boardWhileMuted: true, boardStopKey: null
 };
 export let view = {
@@ -22,7 +23,7 @@ export let view = {
   testLabel: 'Test mic', testPhase: null, testHint: '', testDisabled: true,
   volumeHint: '', volumeHintTitle: '', volumeTitle: '', muteTitle: 'Toggle mute (Ctrl+M)',
   gateVal: '', gateMarkHidden: false, gateMarkPct: 0, gateHint: '',
-  nrHint: '', compHint: 'Your volume goes out as-is', monHint: "You won't hear yourself", monoHint: '',
+  nrHint: '', hqHint: '', compHint: 'Your volume goes out as-is', monHint: "You won't hear yourself", monoHint: '',
   sendOn: true, sendHint: 'Off: other apps hear your raw mic', sendHintCls: '', sendTitle: '', sendLevelShown: false,
   outputs: [{ id: 'default', name: 'Windows default' }], outputSelected: 'default', outputHint: '',
   eqPreset: 'flat', eqFor: '', eqNotice: '', eqSel: null, eqBypass: false, eqVersion: 0,
