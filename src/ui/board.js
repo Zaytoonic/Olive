@@ -84,7 +84,7 @@ export function playSound(id) {
   if (!clip) return;
   if (failed.has(id)) { hint(`"${clip.name}" couldn't be loaded. Remove it and add the file again.`, 'warn'); return; }
   if (!engine.playClip(id, clip.vol / 100)) hint("Couldn't play it: Olive's audio isn't running yet.", 'warn');
-  else if (!state.send && !state.boardLocal) hint("Nobody hears it: Send to Discord is off, and so is hearing sounds yourself.", 'warn');
+  else if (!state.send && !state.boardLocal) hint('Nobody hears it: Send and "Hear them yourself" are off', 'warn');
   else hint('');
 }
 export const stopSounds = () => engine.stopClips();
@@ -155,7 +155,7 @@ function setKey(target, acc) {
 export function startChoosingBoardKey(target) {
   if (choosing || !api()) return;
   choosing = target;
-  show({ boardChoosing: target, boardKeyFor: target, boardKeyHint: 'Press a key, or a combination like Ctrl+1. Esc cancels' });
+  show({ boardChoosing: target, boardKeyFor: target, boardKeyHint: 'Press a key · Esc cancels' });
   applyBoardKeys();
 }
 function finishChoosing(acc) {
@@ -178,6 +178,6 @@ window.addEventListener('keydown', e => {
   if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;   // still holding modifiers
   const acc = boardKeyFromEvent(e);
   if (acc) finishChoosing(acc);
-  else show({ boardKeyHint: "That key can't be used. Try another, or press Esc to cancel" });
+  else show({ boardKeyHint: "Can't use that key · Esc cancels" });
 }, true);
 window.addEventListener('blur', () => { if (choosing) finishChoosing(null); });

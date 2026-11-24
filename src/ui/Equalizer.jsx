@@ -56,7 +56,7 @@ function EqBody() {
           ))}
         </div>
         <div className="olive-eq-readout" aria-live="polite">
-          {!d ? 'Drag a point to shape your sound · Ctrl + scroll over it to change its width · double-click to reset' : (
+          {!d ? 'Drag points · Ctrl+scroll: width · double-click: reset' : (
             <>
               <b>{d.name}</b><span className="olive-value">{fmtHz(s.f)}</span><span className="olive-value">{fmtDb(s.g)}</span>
               {d.type === 'peaking' ? <span className="olive-value">Q {s.q.toFixed(2)}</span> : <span>shelf</span>}
@@ -74,7 +74,7 @@ function EqBody() {
         </Switch>
         <Button id="eqCompare" size="sm" variant={bypass ? 'primary' : 'secondary'} isDisabled={!(monitor && eq.on)}
           onPressStart={() => S.holdCompare(true)} onPressEnd={() => S.holdCompare(false)}>
-          <span title="Turn on Listen, then hold this to hear yourself without the EQ. Discord keeps hearing the EQ.">{bypass ? 'Hearing without EQ' : 'Hold to compare'}</span>
+          <span title="With Listen on, hold to hear yourself without the EQ">{bypass ? 'Hearing without EQ' : 'Hold to compare'}</span>
         </Button>
       </div>
     </div>

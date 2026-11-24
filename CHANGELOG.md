@@ -2,6 +2,13 @@
 
 What changed in each release of Olive. Downloads are on the [Releases](https://github.com/Zaytoonic/Olive/releases) page.
 
+## 2.0.0 (25 November 2026)
+
+- High quality noise reduction: the HQ button next to Noise reduction switches to DeepFilterNet3, which keeps your voice more natural, at about twice the CPU of the standard engine (about 1% of a typical PC). Its strength slider caps how much any sound is turned down, so a laugh can be ducked but not cut out.
+- A cleaner window: sliders only show when they do something, High quality sits beside noise reduction, the Listen volume shows while Listen is on, and the text says only what you need.
+- The soundboard's settings sit in two columns on a wide window.
+- Lighter: Mono is on by default for new installs (stereo ran noise reduction twice, and Discord takes mono), the compressor no longer redraws the window while you talk, and noise reduction that was switched away no longer keeps running in the background.
+
 ## 1.8.1 (24 November 2026)
 
 - Noise reduction goes back to RNNoise's April 2024 model. The 2025 model treated some laughs and parts of words as noise and cut them; the older one let 98.5% of normal talking through the gate on a laptop mic, against 62-88% before, and stays shut when you're quiet.

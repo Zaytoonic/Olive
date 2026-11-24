@@ -976,6 +976,42 @@ async function liveChecks(profile, wav, fixture) {
       check('removing a sound deletes Olive\'s copy and forgets it', r.after === 0 && r.saved === 0 && left.length === 0, `${r.after} in the list, ${r.saved} saved, ${left.length} files left`);
     }
 
+    if (wanted('hq')) {
+      console.log('\nHigh quality noise reduction (DeepFilterNet3, trial)');
+      const hq = await copy.call(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms)), out = {};
+        clearTimeout(startupRetryTimer); startupRetries = 99;
+        const peak = async (secs, node = engine.mainChain.outGain) => {     // loudest sample leaving the chain
+          const a = engine.audioCtx.createAnalyser(), b = new Float32Array(2048); a.fftSize = 2048; node.connect(a);
+          let pk = 0; const t0 = performance.now();
+          while (performance.now() - t0 < secs * 1000) { a.getFloatTimeDomainData(b); for (const v of b) pk = Math.max(pk, Math.abs(v)); await wait(20); }
+          node.disconnect(a); return 20 * Math.log10(pk + 1e-9);
+        };
+        state.nr = true; state.nrAmount = 100; applyNr(); state.gateAuto = true; updateGate(); setMonitor(true);
+        await wait(1500);
+        out.before = engine.status().engine;
+        const t0 = performance.now();
+        setHighQuality(true);
+        for (let i = 0; i < 100 && engine.status().engine !== 'deepfilter'; i++) await wait(100);
+        out.startMs = Math.round(performance.now() - t0);
+        out.on = engine.status().engine; out.failed = engine.status().dfnFailed; out.hint = getView().nrHint;
+        out.saved = JSON.parse(localStorage.getItem(PREFS_KEY)).nrEngine;
+        await wait(7000);                              // the level gate learns the floor of the cleaned audio (6 s window)
+        out.peak = await peak(14);                     // longer than the test file's 8 s of noise: its speech comes through
+        out.gateWorks = !!engine.mainChain.gate && !engine.mainChain.voice;
+        setHighQuality(false);
+        for (let i = 0; i < 50 && engine.status().engine !== 'rnnoise'; i++) await wait(100);
+        out.back = engine.status().engine;
+        await wait(1500);
+        out.backPeak = await peak(10);
+        setMonitor(false);
+        return out;
+      });
+      check('High quality switches to DeepFilterNet3, and is saved', hq.before === 'rnnoise' && hq.on === 'deepfilter' && !hq.failed && hq.saved === 'deepfilter', `${hq.before} -> ${hq.on} in ${hq.startMs} ms, saved "${hq.saved}", "${hq.hint}"`);
+      check('sound comes through it, gated by level', hq.peak > -50 && hq.gateWorks, `output peak ${f1(hq.peak)} dB`);
+      check('switching back returns to RNNoise', hq.back === 'rnnoise' && hq.backPeak > -50, `${hq.back}, output peak ${f1(hq.backPeak)} dB`);
+    }
+
     if (wanted('nr')) console.log('\nNoise reduction slider');
     const drops = [];
     for (const [s, min, max] of wanted('nr') ? [[0, -0.5, 0.5], [25, 4, 9], [60, 12, 25], [100, 20, 200]] : []) {

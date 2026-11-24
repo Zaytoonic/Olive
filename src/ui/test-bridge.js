@@ -13,7 +13,7 @@ import { updateSetup, isCableLabel, cableTestVars } from './cable.js';
 import { dropSounds, playSound, stopSounds, renameSound, setSoundVol, removeSound, selectSound, startChoosingBoardKey, boardKeyLabel, takesTypingKey } from './board.js';
 import {
   muteSound, unmuteSound, sysApi, toggleMute, setMonitor, setSendWanted, loadDevices, selectDevice,
-  applyNr, updateGate, setMutedUi, loadOutputs, currentDevice, updateHints, storeTestVars
+  applyNr, updateGate, setMutedUi, loadOutputs, currentDevice, updateHints, storeTestVars, setHighQuality
 } from './store.js';
 
 const TEST_CONTROLS = {
@@ -34,7 +34,7 @@ const testGlobals = {
   syncEqUi: () => applyEq(),
   eqPoint: eqTestHooks.eqPoint,
   setView: p => ui(p),
-  dropSounds, playSound, stopSounds, renameSound, setSoundVol, removeSound, selectSound, startChoosingBoardKey, boardKeyLabel, takesTypingKey, getView,
+  setHighQuality, dropSounds, playSound, stopSounds, renameSound, setSoundVol, removeSound, selectSound, startChoosingBoardKey, boardKeyLabel, takesTypingKey, getView,
   // The settings live in a drawer that only exists while open: these open it (resolving once it's on screen) and close it.
   openSettings: () => new Promise(resolve => {
     setSettingsOpen(true);

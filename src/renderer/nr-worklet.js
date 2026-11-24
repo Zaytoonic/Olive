@@ -141,9 +141,12 @@ class NoiseReduction extends AudioWorkletProcessor {
   constructor() {
     super();
     this.channels = [];
+    // A processor that returns true keeps running even once nothing is connected to it; the engine sends 'stop' when it takes one out.
+    this.port.onmessage = e => { if (e.data === 'stop') this.stopped = true; };
   }
 
   process(inputs, outputs, parameters) {
+    if (this.stopped) return false;
     const input = inputs[0], output = outputs[0];
     if (!output || !output.length) return true;
     const strength = parameters.strength[0];

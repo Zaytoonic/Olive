@@ -29,9 +29,10 @@ export function loadPrefs() {
   state.volume = num(p.volume, 0, 100, state.volume);
   state.gateDb = num(p.gateDb, -60, -10, state.gateDb);
   if (typeof p.gateAuto === 'boolean') state.gateAuto = p.gateAuto;
-  state.mono = p.mono === true;
+  state.mono = p.mono !== false;           // on unless turned off: Discord takes mono, and stereo runs noise reduction twice
   if (typeof p.nr === 'boolean') state.nr = p.nr;
-  state.nrAmount = num(p.nrStrength, 0, 100, state.nrAmount);   // not the old nrAmount: that slider never changed the live audio
+  state.nrAmount = num(p.nrStrength, 0, 100, state.nrAmount);
+  state.nrEngine = p.nrEngine === 'deepfilter' ? 'deepfilter' : 'rnnoise';   // not the old nrAmount: that slider never changed the live audio
   state.monitorVol = num(p.monitorVol, 0, 100, state.monitorVol);
   state.comp = p.comp === true;
   state.compAmount = num(p.compAmount, 0, 100, state.compAmount);
@@ -57,7 +58,7 @@ export function savePrefs() {
   clearTimeout(saveTimer); saveTimer = null;
   const p = {
     deviceId: pref.deviceId, deviceName: pref.deviceName, volume: state.volume, gateDb: state.gateDb, gateAuto: state.gateAuto, mono: state.mono,
-    nr: state.nr, nrStrength: state.nrAmount, monitorVol: state.monitorVol, send: pref.send,
+    nr: state.nr, nrStrength: state.nrAmount, nrEngine: state.nrEngine, monitorVol: state.monitorVol, send: pref.send,
     ptt: state.ptt, pttKey: state.pttKey, outputId: state.outputId, outputName: state.outputName, setupDone: state.setupDone, updateAuto: state.updateAuto,
     comp: state.comp, compAmount: state.compAmount, muteHotkey: state.muteHotkey, muteAccel: state.muteAccel, eqOpen: state.eqOpen,
     muteSounds: state.muteSounds, muteSoundVol: state.muteSoundVol, badge: state.badge, badgeCorner: state.badgeCorner,
