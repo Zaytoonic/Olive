@@ -13,7 +13,7 @@
 ## Features
 <img src="docs/settings.png" align="right" width="300" alt="The Settings panel">
 
-- **Voice cleanup:** RNNoise noise reduction with adjustable strength, and a noise gate that opens only when it hears your voice.
+- **Voice cleanup:** noise reduction with two engines, Standard (RNNoise) or HQ (DeepFilterNet3, a more natural voice), and a noise gate that opens only when it hears your voice.
 - **Compressor** to even out your volume.
 - **Six-band EQ** with a low cut and presets, saved separately for each mic, and a hold-to-compare button.
 - **Send to Discord or other apps** through [VB-Audio Virtual Cable](https://vb-audio.com/Cable/).
@@ -27,10 +27,14 @@
 
 <br clear="right">
 
-## What's new in 1.8.1
-- **Noise reduction that keeps your voice.** Olive goes back to RNNoise's April 2024 model: the 2025 one treated some laughs and parts of words as noise. It also removes more of a gusty fan and uses about 30% less CPU.
+## What's new in 2.0
+- **High quality noise reduction.** The **HQ** button next to Noise reduction switches to DeepFilterNet3: your voice comes through more natural, at about twice the CPU of the standard engine (around 1% of a typical PC). Its strength slider caps how much any sound is turned down, so a laugh can be ducked but not cut out.
+- **A cleaner window.** Sliders only show when they do something, and the text says only what you need.
+- **Lighter.** Mono is on by default, and noise reduction you've switched away from no longer keeps running.
 
-### And in 1.8.0
+### And in 1.8
+- **Noise reduction that keeps your voice.** RNNoise's April 2024 model: the 2025 one treated some laughs and parts of words as noise.
+
 ![The soundboard](docs/soundboard.png)
 
 - **A soundboard.** Add sound files (MP3, WAV, OGG, FLAC or M4A, up to 2 minutes), then click one to play it. Discord hears it over your voice.
@@ -103,14 +107,16 @@ src/renderer/    what the window page loads
   audio-engine.js  the audio chain: mic capture, noise reduction, EQ, gate, compressor, soundboard, Listen and the cable. It never touches the page, so a new window can drive it the same way
   badge.html, badge.css  the Muted badge
   voice-worklet.js noise reduction (RNNoise) and the voice gate
+  deepfilter-worklet.js  High quality noise reduction (DeepFilterNet3); dfn-polyfill.js fills in what its glue needs on the audio thread
   gate-worklet.js  volume gate, for a gate set by hand or as the fallback
   nr-worklet.js    fallback noise reduction, if the voice engine can't start
   recorder-worklet.js  records the mic test
-  vendor/          RNNoise (xiph, v0.2 from April 2024) compiled to WebAssembly by tools/build-rnnoise.js
+  vendor/          RNNoise (xiph, v0.2 from April 2024) compiled to WebAssembly by tools/build-rnnoise.js;
+                   deepfilter/: DeepFilterNet3 and its model, built by tools/build-deepfilter.js
 assets/          icons and mute sounds, both made from code (tools/make-icons.js, tools/make-sounds.js)
 docs/            the screenshots above
 CHANGELOG.md     what changed in each release
-tools/           build, packaging, signing, icon and sound scripts; build-rnnoise.js rebuilds vendor/rnnoise.wasm
+tools/           build, packaging, signing, icon and sound scripts; build-rnnoise.js and build-deepfilter.js rebuild the noise reduction
   audio-test/      npm run test:audio
   installer/       the installer and uninstaller source, and npm run test:installer
 ```
@@ -118,4 +124,4 @@ tools/           build, packaging, signing, icon and sound scripts; build-rnnois
 The palette and icon are described in [DESIGN.md](DESIGN.md).
 
 ## Licence
-Olive is released under the [MIT licence](LICENSE): you can use, change and share it, as long as the copyright notice stays with it. The bundled RNNoise build in `src/renderer/vendor` keeps its own BSD licence, in `rnnoise-LICENSE.txt`.
+Olive is released under the [MIT licence](LICENSE): you can use, change and share it, as long as the copyright notice stays with it. The bundled noise reduction in `src/renderer/vendor` keeps its own licences: RNNoise is BSD (`rnnoise-LICENSE.txt`), DeepFilterNet's code and model are MIT or Apache-2.0 (`deepfilter/LICENSE.txt`).
