@@ -994,7 +994,7 @@ async function liveChecks(profile, wav, fixture) {
         setHighQuality(true);
         for (let i = 0; i < 100 && engine.status().engine !== 'deepfilter'; i++) await wait(100);
         out.startMs = Math.round(performance.now() - t0);
-        out.on = engine.status().engine; out.failed = engine.status().dfnFailed; out.hint = getView().hqHint;
+        out.on = engine.status().engine; out.failed = engine.status().dfnFailed; out.hint = getView().nrHint;
         out.saved = JSON.parse(localStorage.getItem(PREFS_KEY)).nrEngine;
         await wait(7000);                              // the level gate learns the floor of the cleaned audio (6 s window)
         out.peak = await peak(14);                     // longer than the test file's 8 s of noise: its speech comes through

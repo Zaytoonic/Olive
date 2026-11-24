@@ -9,8 +9,7 @@ export function Soundboard() {
   const board = useV(v => v.st.board), playing = useV(v => v.boardPlaying), sel = useV(v => v.boardSel);
   const hint = useV(v => v.boardHint), tone = useV(v => v.boardHintTone), sendOn = useV(v => v.sendOn), local = useV(v => v.st.boardLocal);
   const [dragging, setDragging] = useState(false);
-  const status = sendOn ? 'Click a sound to play it. Discord hears it over your voice.'
-    : local ? 'Send to Discord is off, so only you hear these.' : "Send to Discord is off, and you've turned off hearing them, so nobody hears these.";
+  const status = sendOn ? '' : local ? 'Send is off: only you hear these' : 'Send is off: nobody hears these';
   const hasFiles = e => Array.from(e.dataTransfer.types || []).includes('Files');
   const selected = board.find(c => c.id === sel);
   return (
@@ -31,7 +30,7 @@ export function Soundboard() {
         </div>
         {board.length
           ? <div className="olive-pads">{board.map(c => <Pad key={c.id} clip={c} playing={playing.includes(c.id)} editing={c.id === sel} />)}</div>
-          : <div className="olive-board-empty">Drag sound files here, or click Add sounds.<br />MP3, WAV, OGG, FLAC or M4A, up to {S.BOARD_MAX_SECONDS / 60} minutes long.</div>}
+          : <div className="olive-board-empty">Drop sound files here<br />MP3, WAV, OGG, FLAC or M4A · up to {S.BOARD_MAX_SECONDS / 60} min</div>}
         <Hint id="boardHint" tone={tone || undefined} live>{hint}</Hint>
         {selected && <PadEditor clip={selected} />}
       </div>
@@ -79,19 +78,18 @@ function PadEditor({ clip }) {
 function BoardLevels() {
   const vol = useV(v => v.st.boardVol), local = useV(v => v.st.boardLocal), localVol = useV(v => v.st.boardLocalVol), muted = useV(v => v.st.boardWhileMuted);
   return (
-    <>
-      <Row title="Volume for others" value={vol + '%'} hint="How loud others hear your sounds">
+    <div className="olive-board-settings">
+      <Row title="Volume for others" value={vol + '%'}>
         <Level label="Soundboard volume for others" value={vol} onChange={S.setBoardVol} />
       </Row>
-      <Row title="Hear sounds yourself" value={local ? localVol + '%' : 'Off'}
-        hint={local ? 'You hear your sounds too' : 'Only others hear your sounds'}
-        end={<Toggle label="Hear sounds yourself" title="Play sounds on your own output too" isSelected={local} onChange={S.setBoardLocal} />}>
-        <Level label="Soundboard volume for you" value={localVol} onChange={S.setBoardLocalVol} isDisabled={!local} />
+      <Row title="Hear them yourself" value={local ? localVol + '%' : 'Off'}
+        end={<Toggle label="Hear sounds yourself" title="Also play sounds on your output" isSelected={local} onChange={S.setBoardLocal} />}>
+        {local && <Level label="Soundboard volume for you" value={localVol} onChange={S.setBoardLocalVol} />}
       </Row>
       <KeyRow title="Stop all hotkey" target="stop" accel={useV(v => v.st.boardStopKey)} what="stop all sounds" />
-      <Row title="Play while muted" hint={muted ? "Sounds play even when you're muted" : 'Muting also mutes your sounds'}
+      <Row title="Play while muted"
         end={<Toggle label="Play sounds while muted" title="Let sounds through while your mic is muted" isSelected={muted} onChange={S.setBoardWhileMuted} />} />
-    </>
+    </div>
   );
 }
 
@@ -100,11 +98,10 @@ function KeyRow({ title, target, accel, what }) {
   const choosing = useV(v => v.boardChoosing === target), failed = useV(v => !!accel && v.boardKeyFailed.includes(accel));
   const hint = useV(v => (v.boardKeyFor === target ? v.boardKeyHint : ''));   // "press the shortcut", or why one was refused
   const label = accel ? S.boardKeyLabel(accel) : 'None';
-  const idle = !accel ? `Click Set key, then press the key you want to ${what}.`
-    : `Press ${label} anywhere, even in a game, to ${what}.` + (S.takesTypingKey(accel) ? ` Other apps can't use ${label} while it's set.` : '');
+  const idle = accel && S.takesTypingKey(accel) ? `Other apps can't use ${label} while it's set` : '';
   return (
     <Row title={title} value={choosing ? 'Press a key…' : label}
-      hint={choosing || hint ? hint : failed ? `Another app is already using ${label}. Pick a different key.` : idle}
+      hint={choosing || hint ? hint : failed ? `${label} is taken by another app` : idle}
       hintTone={failed || (!choosing && hint) ? 'warn' : undefined}
       end={<>
         {accel && !choosing && <Button size="sm" variant="ghost" onPress={() => S.clearBoardKey(target)}>Remove</Button>}

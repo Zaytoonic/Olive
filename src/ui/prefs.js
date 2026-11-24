@@ -29,7 +29,7 @@ export function loadPrefs() {
   state.volume = num(p.volume, 0, 100, state.volume);
   state.gateDb = num(p.gateDb, -60, -10, state.gateDb);
   if (typeof p.gateAuto === 'boolean') state.gateAuto = p.gateAuto;
-  state.mono = p.mono === true;
+  state.mono = p.mono !== false;           // on unless turned off: Discord takes mono, and stereo runs noise reduction twice
   if (typeof p.nr === 'boolean') state.nr = p.nr;
   state.nrAmount = num(p.nrStrength, 0, 100, state.nrAmount);
   state.nrEngine = p.nrEngine === 'deepfilter' ? 'deepfilter' : 'rnnoise';   // not the old nrAmount: that slider never changed the live audio

@@ -94,7 +94,7 @@ export function playMuteSound(muting) {
 // The slider follows loudness rather than raw level: halfway sounds about half as loud.
 function applyMuteSoundVol() {
   muteSound.volume = unmuteSound.volume = (state.muteSoundVol / 100) ** 2;
-  ui({ soundHint: state.muteSounds ? "Play where Listen plays. Discord doesn't hear them" : 'Off: muting and unmuting are silent' });
+  ui({ soundHint: '' });
 }
 export function setMuteSounds(on) { state.muteSounds = on; applyMuteSoundVol(); if (on) playMuteSound(true); savePrefs(); }
 export function setMuteSoundVol(v) { state.muteSoundVol = v; applyMuteSoundVol(); scheduleSave(); }
@@ -124,20 +124,13 @@ export function setMonitor(on) {
   updateHints();
 }
 function applyMono() {
-  ui({ monoHint: state.mono ? 'On: left and right mixed, heard in both ears' : 'Off: stereo mics keep left and right separate' });
   engine.set({ mono: state.mono });
 }
 // With Windows control the captured audio already has the Windows level applied, so the app adds no gain.
 export const volFactor = () => (curSys() ? 1 : state.volume / 75);
 function updateVolumeGain() { engine.set({ inputGain: volFactor() }); }
 export function applyNr() { engine.set({ nr: state.nr, nrAmount: state.nrAmount }); }
-function applyComp() { engine.set({ comp: state.comp, compAmount: state.compAmount }); updateCompHint(); }
-export function updateCompHint() {
-  if (!state.comp) { ui({ compHint: 'Your volume goes out as-is' }); return; }
-  const r = engine.compReduction();
-  const text = r < -0.5 ? `Evening out ${(-r).toFixed(1)} dB` : 'Evens out your volume';
-  if (text !== view.compHint) ui({ compHint: text });
-}
+function applyComp() { engine.set({ comp: state.comp, compAmount: state.compAmount }); }
 // Mute and push to talk silence what leaves Olive (Listen and the cable).
 export function syncTalking() { engine.set({ talking: talking(), talkFade: talkFade() }); }
 const gateDbNow = () => (state.gateAuto ? engine.autoGateDb : state.gateDb);
@@ -156,22 +149,20 @@ export function refreshGateUi() {
   shownGate = label;
   ui({
     gateVal: label, gateMarkHidden: !!byVoice, gateMarkPct: dbToPct(t),
-    gateHint: !byVoice && st.gateFailed ? 'Using the backup gate, which can clip the start of words' : byVoice ? 'Opens when it hears a voice, so fans and bumps stay out' : state.gateAuto ? 'Mutes you when you go quiet; follows your background noise' : "Mutes you when you're quieter than this"
+    gateHint: !byVoice && st.gateFailed ? 'Backup gate: may clip word starts' : ''
   });
 }
 export function updateHints() {
   const st = engine.status();
   ui({
-    nrHint: !state.nr ? 'Off: nothing is removed'
-      : st.nrFailed ? 'Unavailable: the noise reduction engine could not start'
-      : st.voiceFailed ? "Using the backup noise reduction: the voice engine couldn't start"
-      : st.engine === 'deepfilter' ? `High quality: nothing is turned down more than ${state.nrAmount >= 100 ? 'it takes' : Math.round(state.nrAmount * 0.3) + ' dB'}. Lower it so laughs can only be ducked, never cut`
-      : 'Lowers fans, rumble and hiss. Turn it down to mix your natural sound back in',
-    hqHint: state.nrEngine !== 'deepfilter' ? 'Off: the standard engine (RNNoise)'
-      : st.dfnFailed ? "Couldn't start, so the standard engine is running"
-      : st.engine === 'deepfilter' ? 'On: DeepFilterNet3 keeps your voice more natural. Uses about twice the CPU, and the gate follows your volume'
-      : 'Starting…',
-    monHint: !state.monitor ? "You won't hear yourself" : engine.capturing ? 'Use headphones to avoid echo' : 'On · microphone not open, nothing to play',
+    nrHint: !state.nr ? ''
+      : st.nrFailed ? "Couldn't start"
+      : st.voiceFailed ? 'Using the backup engine'
+      : state.nrEngine === 'deepfilter' && st.dfnFailed ? "HQ couldn't start: using Standard"
+      : state.nrEngine === 'deepfilter' && st.engine !== 'deepfilter' ? 'Starting HQ…'
+      : st.engine === 'deepfilter' ? 'HQ: more natural voice, about twice the CPU'
+      : '',
+    monHint: !state.monitor ? '' : engine.capturing ? 'Use headphones' : 'No microphone',
     ...(engine.micTest ? {} : { testDisabled: !engine.capturing })
   });
 }
@@ -296,14 +287,12 @@ export function applySysToUi() {
     volSent = null;
     state.volume = Math.round(ep.volume * 100);
     if (ep.muted !== state.muted) setMutedUi(ep.muted);
-    ui({ volumeHint: '', volumeHintTitle: '', volumeTitle: 'Sets the Windows mic level and mute · affects all apps' });
+    ui({ volumeHint: '', volumeHintTitle: '', volumeTitle: 'Windows mic level (all apps)' });
   } else {
     ui({
       volumeHint: !live ? 'No microphone'
-        : sysStatus === 'connecting' ? 'Connecting to Windows audio…'
-        : sysStatus === 'ready' ? "In this app only · couldn't match this mic to a Windows device"
-        : sysStatus === 'error' ? 'In this app only · Windows control unavailable'
-        : 'In this app only',
+        : sysStatus === 'connecting' ? 'Connecting to Windows…'
+        : 'Olive only (no Windows control)',
       volumeHintTitle: sysError, volumeTitle: ''
     });
   }
@@ -387,17 +376,17 @@ export function chooseOutput(id) {
 
 // ---- Mic test: record 5 s of what Olive sends, then play it back to you (the engine does the audio) ----
 function showTest(label, phase, hint) { ui({ testLabel: label, testPhase: phase, ...(hint !== undefined ? { testHint: hint } : {}) }); }
-const testHeard = e => (e.silent ? 'Nothing got through: the noise gate stayed shut. Talk louder, or turn the gate down'
-  : e.toCable ? 'Playing back what Discord hears'
-  : "Playing back Olive's sound. Send to Discord is off, so Discord hears your raw mic");
+const testHeard = e => (e.silent ? 'Nothing got through: the gate stayed shut'
+  : e.toCable ? 'Playing what Discord hears'
+  : "Playing Olive's sound (Send is off)");
 function onMicTest(e) {
   if (e.phase === 'recording') {
-    showTest(`Recording · ${e.secondsLeft}`, 'recording', !e.first ? undefined : state.muted ? "Recording. You're muted, so nobody else hears this" : 'Recording. Talk the way you normally do');
+    showTest(`Recording · ${e.secondsLeft}`, 'recording', !e.first ? undefined : state.muted ? "Recording (you're muted)" : 'Recording… talk normally');
   } else if (e.phase === 'playing') {
     showTest('Stop', 'playing', testHeard(e));
   } else {
     const hint = e.reason === 'error' ? "The mic test couldn't start: " + cleanErr(e.error)
-      : e.reason === 'short' ? 'That was too short to play back. Try again'
+      : e.reason === 'short' ? 'Too short. Try again'
       : e.reason === 'silent' ? testHeard(e) : '';
     showTest('Test mic', null, hint);
     ui({ testDisabled: !engine.capturing });
@@ -426,7 +415,7 @@ export function start() {
   engine.init(EQ_BANDS);
   initBoard();
   applyMono();
-  updateGate(); updateHints(); updateCompHint();
+  updateGate(); updateHints();
   initStartup();
   initMuteHotkey();
   initPtt();

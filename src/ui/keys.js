@@ -46,9 +46,9 @@ async function toggleMuteFromOutside() {
 export const hotkeyLabel = a => a.replace('Control', 'Ctrl').replace('Super', 'Win');
 export async function applyMuteHotkey() {
   const label = hotkeyLabel(state.muteAccel);
-  if (!state.muteHotkey) { await window.appMute.setHotkey(null); ui({ muteKeyHint: 'Off: Ctrl+M still works while this window has focus' }); return; }
+  if (!state.muteHotkey) { await window.appMute.setHotkey(null); ui({ muteKeyHint: 'Off (Ctrl+M still works in this window)' }); return; }
   const ok = await window.appMute.setHotkey(state.muteAccel);
-  ui({ muteKeyHint: ok ? `${label} mutes your mic from anywhere` : `${label} is already in use by another app` });
+  ui({ muteKeyHint: ok ? `${label} mutes you from anywhere` : `${label} is already in use by another app` });
 }
 export function setMuteHotkeyOn(on) { state.muteHotkey = on; applyMuteHotkey(); savePrefs(); ui(); }
 // Changing the shortcut: the next key combination pressed in this window becomes it.
@@ -67,7 +67,7 @@ export async function startChoosingHotkey() {
   if (hotkeyChoosing || !window.appMute) return;
   setHotkeyChoosing(true);
   await window.appMute.setHotkey(null);
-  ui({ muteKeyHint: 'Press the new shortcut, or Esc to cancel' });
+  ui({ muteKeyHint: 'Press the new shortcut · Esc cancels' });
 }
 async function finishChoosingHotkey(accelerator) {
   setHotkeyChoosing(false);
@@ -122,7 +122,7 @@ function vkFromCode(code) {
 }
 function showPttHint() {
   let h;
-  if (!state.ptt) h = 'Off: your mic is open unless you mute it';
+  if (!state.ptt) h = '';
   else if (!state.pttKey) h = 'Choose a key to hold while you talk';
   else if (!state.send) h = `Hold ${state.pttKey.label} to talk. Turn on Send to Discord too: apps using your mic directly aren't affected`;
   else h = /^[A-Z0-9]$/.test(state.pttKey.label) ? `Hold ${state.pttKey.label} to talk. It still types ${state.pttKey.label} in other apps` : `Hold ${state.pttKey.label} to talk`;
@@ -155,7 +155,7 @@ function finishChoosingPtt(key) {
 export function startChoosingPtt() {
   if (pttChoosing) return;
   pttChoosing = true;
-  ui({ pttChoosing: true, pttHint: 'Press a key or a side mouse button, or Esc to cancel', pttNotice: false });
+  ui({ pttChoosing: true, pttHint: 'Press a key or side mouse button · Esc cancels', pttNotice: false });
 }
 window.addEventListener('keydown', e => {
   if (!pttChoosing) return;

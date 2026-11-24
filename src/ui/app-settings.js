@@ -6,7 +6,7 @@ import { savePrefs } from './prefs.js';
 // ---- Muted badge ----
 // The badge is its own small window, made by main.js; this only says whether it's wanted and where.
 function applyBadge(preview) {
-  ui({ badgeHint: state.badge ? "Shows over other apps and windowed games while you're muted" : 'Off: the tray icon still turns red while muted' });
+  ui({ badgeHint: state.badge ? "Shows over apps and windowed games while you're muted" : '' });
   if (window.appBadge) window.appBadge.set(state.badge, state.badgeCorner, preview).catch(() => {});
 }
 export function setBadge(on) { state.badge = on; applyBadge(true); savePrefs(); }

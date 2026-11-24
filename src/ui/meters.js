@@ -4,7 +4,7 @@
 import { engine, MIN_DB, dbToPct, ampToDb, state } from './core.js';
 import { pttOpen } from './keys.js';
 import { redrawEqGraph } from './eq.js';
-import { volFactor, updateCompHint, refreshGateUi } from './store.js';
+import { volFactor, refreshGateUi } from './store.js';
 
 let smoothed = MIN_DB, peak = MIN_DB, peakHold = 0, last = performance.now();
 let compTick = 0, windowHidden = false;
@@ -48,7 +48,6 @@ function tick() {
   smoothed = Math.max(MIN_DB, smoothed);
   if (smoothed >= peak) { peak = smoothed; peakHold = 1; } else if ((peakHold -= dt) <= 0) peak = Math.max(MIN_DB, peak - 20 * dt);
   if ((compTick = (compTick + 1) % 8) === 0) {           // ~4x per second
-    if (state.comp) updateCompHint();
     if (state.gateAuto) refreshGateUi();
   }
   // Only GPU-friendly transforms, and only when the value changed; text at most 5x per second.

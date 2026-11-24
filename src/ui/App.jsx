@@ -18,10 +18,10 @@ export function App() {
           <div className="olive-columns">
             <div className="olive-col">
               <Section title="Microphone"><Volume /><Gate /></Section>
-              <Section title="Processing"><NoiseReduction /><HighQuality /><Compressor /></Section>
+              <Section title="Processing"><NoiseReduction /><Compressor /></Section>
             </div>
             <div className="olive-col">
-              <Section title="Output"><Send /><Mono /><Monitoring /><OutputDevice /></Section>
+              <Section title="Output"><Send /><Mono /><ListenVolume /><OutputDevice /></Section>
             </div>
           </div>
           <Section title="Soundboard"><Soundboard /></Section>
@@ -107,10 +107,10 @@ function MicCard() {
           </div>
           <div className="olive-actions">
             <Button id="testBtn" variant="secondary" isDisabled={testDisabled} onPress={S.pressTest} className="olive-pill" data-phase={testPhase || undefined}>
-              <span title="Record 5 seconds, then hear exactly what Olive sends to Discord">{testLabel}</span>
+              <span title="Record 5 seconds, then hear what Discord hears">{testLabel}</span>
             </Button>
             <ToggleButton id="listenBtn" isSelected={monitor} onChange={S.setMonitor} className="olive-pill olive-listen" aria-label="Listen">
-              <span title="Hear your mic live (use headphones)">{monitor ? 'Listening' : 'Listen'}</span>
+              <span title="Hear yourself (use headphones)">{monitor ? 'Listening' : 'Listen'}</span>
             </ToggleButton>
             <Button id="muteBtn" variant={muted ? 'danger' : 'secondary'} onPress={S.toggleMute} aria-pressed={muted} className="olive-pill olive-mute">
               <span className="olive-icon small">{muted ? Icon.micOff : Icon.mic}</span><span title={muteTitle}>{muted ? 'Muted' : 'Mute'}</span>
@@ -138,7 +138,7 @@ function InputMeter() {
       <div className="olive-row-head">
         <span className="olive-meter-title">
           <span className="olive-caption">Input level</span>
-          <span ref={chip} id="gateChip" className="olive-gate-chip" data-state="none" title="Whether your sound is getting through to other apps" />
+          <span ref={chip} id="gateChip" className="olive-gate-chip" data-state="none" title="Whether your voice is getting through" />
         </span>
         <span ref={levelDb} id="levelDb" className="olive-value">-∞ dB</span>
       </div>
@@ -165,40 +165,41 @@ function Volume() {
   );
 }
 
+// A row's slider only shows when it does something: not while that feature is off, or set to automatic.
 function Gate() {
   const auto = useV(v => v.st.gateAuto), db = useV(v => v.st.gateDb), label = useV(v => v.gateVal), hint = useV(v => v.gateHint);
   return (
-    <Row title="Noise gate" value={label} hint={hint}
+    <Row title="Noise gate" value={label} hint={hint} hintTone="warn"
       end={<ToggleButton size="sm" isSelected={auto} onChange={S.setGateAuto} className="olive-chip-toggle" aria-label="Automatic noise gate">
-        <span title="Auto: the gate follows your voice and background noise. Off: set the level by hand with the slider">Auto</span>
+        <span title="Auto: opens for your voice. Off: set the level yourself">Auto</span>
       </ToggleButton>}>
-      <Level label="Noise gate level" value={db} min={-60} max={-10} onChange={S.setGateDb} isDisabled={auto} />
+      {!auto && <Level label="Noise gate level" value={db} min={-60} max={-10} onChange={S.setGateDb} />}
     </Row>
   );
 }
 
+// Noise reduction, with its engine: Standard (RNNoise) or HQ (DeepFilterNet3, a more natural voice at about twice the CPU).
 function NoiseReduction() {
-  const on = useV(v => v.st.nr), amount = useV(v => v.st.nrAmount), hint = useV(v => v.nrHint);
+  const on = useV(v => v.st.nr), amount = useV(v => v.st.nrAmount), hint = useV(v => v.nrHint), hq = useV(v => v.st.nrEngine === 'deepfilter');
   return (
     <Row title="Noise reduction" value={on ? amount + '%' : 'Off'} hint={hint}
-      end={<Toggle label="Noise reduction" title="Automatic noise reduction" isSelected={on} onChange={S.setNr} />}>
-      <Level label="Noise reduction strength" value={amount} onChange={S.setNrAmount} isDisabled={!on} />
+      end={<>
+        {on && <ToggleButton id="hqToggle" size="sm" isSelected={hq} onChange={S.setHighQuality} className="olive-chip-toggle" aria-label="High quality noise reduction">
+          <span title="High quality: a more natural voice, about twice the CPU">HQ</span>
+        </ToggleButton>}
+        <Toggle label="Noise reduction" title="Remove background noise" isSelected={on} onChange={S.setNr} />
+      </>}>
+      {on && <Level label="Noise reduction strength" value={amount} onChange={S.setNrAmount} />}
     </Row>
   );
-}
-// Trial: DeepFilterNet3 in place of RNNoise.
-function HighQuality() {
-  const on = useV(v => v.st.nrEngine === 'deepfilter'), nr = useV(v => v.st.nr), hint = useV(v => v.hqHint);
-  return <Row title="High quality noise reduction (trial)" hint={hint}
-    end={<Toggle label="High quality noise reduction" title="DeepFilterNet3: a more natural voice, about twice the CPU" isSelected={on} onChange={S.setHighQuality} isDisabled={!nr} />} />;
 }
 
 function Compressor() {
-  const on = useV(v => v.st.comp), amount = useV(v => v.st.compAmount), hint = useV(v => v.compHint);
+  const on = useV(v => v.st.comp), amount = useV(v => v.st.compAmount);
   return (
-    <Row title="Compressor / auto-level" value={on ? amount + '%' : 'Off'} hint={hint}
-      end={<Toggle label="Compressor" title="Even out your volume" isSelected={on} onChange={S.setComp} />}>
-      <Level label="Compressor strength" value={amount} onChange={S.setCompAmount} isDisabled={!on} />
+    <Row title="Compressor" value={on ? amount + '%' : 'Off'}
+      end={<Toggle label="Compressor" title="Even out loud and quiet speech" isSelected={on} onChange={S.setComp} />}>
+      {on && <Level label="Compressor strength" value={amount} onChange={S.setCompAmount} />}
     </Row>
   );
 }
@@ -207,7 +208,7 @@ function Send() {
   const on = useV(v => v.sendOn), hint = useV(v => v.sendHint), cls = useV(v => v.sendHintCls), title = useV(v => v.sendTitle);
   const levelShown = useV(v => v.sendLevelShown), setupOpen = useV(v => v.setupOpenShown);
   return (
-    <Row title="Send to Discord / other apps"
+    <Row title="Send to Discord"
       end={<Toggle label="Send to Discord / other apps" title={title} isSelected={on} onChange={S.setSendWanted} />}>
       <Hint id="sendHint" tone={cls === 'warn' ? 'warn' : cls === 'on' ? 'on' : undefined} title={title}>{hint}</Hint>
       <div hidden={!setupOpen}><Button id="setupOpen" size="sm" variant="secondary" onPress={S.setupShow}>Show setup steps</Button></div>
@@ -229,16 +230,17 @@ function SendLevel({ shown }) {
 }
 
 function Mono() {
-  const on = useV(v => v.st.mono), hint = useV(v => v.monoHint);
-  return <Row title="Mono audio" hint={hint} end={<Toggle label="Mono audio" title="Mix left and right into one channel" isSelected={on} onChange={S.setMono} />} />;
+  const on = useV(v => v.st.mono);
+  return <Row title="Mono" end={<Toggle label="Mono audio" title="One channel, as Discord uses. Stereo doubles the noise reduction work" isSelected={on} onChange={S.setMono} />} />;
 }
 
-function Monitoring() {
+// Listen itself is the button by the mic; its volume shows here while it's on.
+function ListenVolume() {
   const on = useV(v => v.st.monitor), vol = useV(v => v.st.monitorVol), hint = useV(v => v.monHint);
+  if (!on) return null;
   return (
-    <Row title="Mic monitoring" value={on ? vol + '%' : 'Off'} hint={hint}
-      end={<Toggle label="Mic monitoring" title="Hear yourself" isSelected={on} onChange={S.setMonitor} />}>
-      <Level label="Monitoring level" value={vol} onChange={S.setMonitorVol} isDisabled={!on} />
+    <Row title="Listen volume" value={vol + '%'} hint={hint}>
+      <Level label="Monitoring level" value={vol} onChange={S.setMonitorVol} />
     </Row>
   );
 }
@@ -246,9 +248,9 @@ function Monitoring() {
 function OutputDevice() {
   const outputs = useV(v => v.outputs), sel = useV(v => v.outputSelected), hint = useV(v => v.outputHint);
   return (
-    <Row title="Listen and mute sounds play on" hint={hint} hintTone="notice" hintId="outputHint">
+    <Row title="Your output" hint={hint} hintTone="notice" hintId="outputHint">
       <Pick label="Listen and mute sounds play on" items={outputs} value={sel} onChange={S.chooseOutput} className="olive-output-select"
-        title="Where you hear yourself and the mute sounds. Discord doesn't hear either." />
+        title="Where you hear Listen, mute sounds and your soundboard. Discord doesn't hear these." />
     </Row>
   );
 }

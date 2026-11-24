@@ -257,3 +257,11 @@ body {
 .olive-pad-editor .olive-row { padding-bottom: 6px; }
 .olive-pad-input { flex: 1; min-width: 0; max-width: 320px; background: var(--surface-tertiary); border: 1px solid var(--hairline); border-radius: 8px; padding: 6px 10px; font-size: 14px; }
 .olive-pad-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* The soundboard's settings: two columns when there's room, a hairline between rows in each */
+.olive-board-settings { display: grid; grid-template-columns: 1fr; column-gap: 32px; }
+.olive-board-settings > * + * { border-top: 1px solid var(--hairline); }
+@container (min-width: 780px) {
+  .olive-board-settings { grid-template-columns: 1fr 1fr; }
+  .olive-board-settings > :nth-child(2) { border-top: 0; }
+}

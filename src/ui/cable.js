@@ -9,7 +9,7 @@ let sendToken = 0;
 export function sendHint(text, cls) {
   ui({
     sendHint: text, sendHintCls: cls || '',
-    sendTitle: cls === 'on' ? 'Sending to the virtual cable. In Discord, choose "CABLE Output (VB-Audio Virtual Cable)" as your input device.' : 'Send the processed mic to VB-Audio Virtual Cable'
+    sendTitle: cls === 'on' ? 'In Discord, set the input device to "CABLE Output (VB-Audio Virtual Cable)"' : 'Send your processed mic to VB-Audio Virtual Cable'
   });
 }
 // What other apps get right now, in words. The level bar only shows while the cable is connected.
@@ -17,9 +17,9 @@ export function updateSendStatus() {
   const connected = engine.hasSend && state.send && live;
   ui({ sendLevelShown: connected });
   if (!connected) return;
-  if (state.muted) sendHint('Muted: nothing is being sent', 'on');
-  else if (state.ptt && !pttOpen) sendHint(state.pttKey ? `Push to talk: hold ${state.pttKey.label} to send` : 'Push to talk: choose a key below', 'on');
-  else sendHint('Sending. In Discord, choose "CABLE Output" as your input', 'on');
+  if (state.muted) sendHint('Muted', 'on');
+  else if (state.ptt && !pttOpen) sendHint(state.pttKey ? `Hold ${state.pttKey.label} to talk` : 'Push to talk: pick a key in Settings', 'on');
+  else sendHint('In Discord, set input to "CABLE Output"', 'on');
 }
 let findCable = async function findCable() {
   const all = await navigator.mediaDevices.enumerateDevices();
@@ -31,7 +31,7 @@ export async function setSend(on) {
   const token = ++sendToken;
   if (!on) {
     stopSending();
-    sendHint('Off: other apps hear your raw mic');
+    sendHint('');
     updateSendStatus();
     return;
   }
@@ -41,7 +41,7 @@ export async function setSend(on) {
     if (token !== sendToken) return;
     if (!cable) {
       stopSending();
-      sendHint('VB-Audio Virtual Cable not found. Install it from vb-audio.com/Cable, restart the PC, then try again.', 'warn');
+      sendHint('VB-Audio Virtual Cable not found. Install it (vb-audio.com/Cable), restart, then try again.', 'warn');
       updateSendStatus();
       return;
     }
@@ -52,7 +52,7 @@ export async function setSend(on) {
     }
     state.send = true;
     engine.set({ send: true });
-    if (live) updateSendStatus(); else sendHint('On · but there is no microphone to send', 'warn');
+    if (live) updateSendStatus(); else sendHint('No microphone', 'warn');
     ui();
   } catch (err) {
     if (token !== sendToken) return;
