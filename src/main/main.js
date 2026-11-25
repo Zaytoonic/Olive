@@ -1,7 +1,7 @@
 const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, protocol, globalShortcut, screen, shell, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn, execFile } = require('child_process');
+const { spawn } = require('child_process');
 
 // A simple window that mostly sits in the tray doesn't need the graphics process. Measured: about 150 MB less memory,
 // the same CPU with a moving meter, still smooth; only scrolling and dragging cost a little more, while they happen.
@@ -127,7 +127,7 @@ ipcMain.handle('startup:set', (event, on) => {
 let win = null, tray = null, quitting = false;
 const notices = [];                            // problems from starting up, for the page to show
 
-// Every time the window is closed, say where Olive went.
+// Every time the window is closed, say where Olive went. The installer registers the name and icon Windows heads it with.
 function showTrayHint() {
   if (!tray || process.platform !== 'win32') return;
   const size = Math.round(32 * screen.getPrimaryDisplay().scaleFactor);
@@ -138,18 +138,6 @@ function showTrayHint() {
     title: 'Olive is still running',
     content: 'Right-click its tray icon and choose Quit to close it.'
   });
-}
-
-// Windows names a notification after the app's ID. Olive's (electron.app.Olive, which Start with Windows and the
-// installer also use) had no name registered, so notifications were headed "electron.app.Olive". This registers
-// "Olive" and its icon for that ID, for this Windows user (no admin needed); the uninstaller removes it.
-const APP_ID = () => 'electron.app.' + app.getName();   // Electron's own ID for the app (electron.app.Olive when installed)
-function registerAppName() {
-  if (!canRegisterAtLogin()) return;                 // only the installed app, not test copies
-  const key = `HKCU\\Software\\Classes\\AppUserModelId\\${APP_ID()}`;
-  for (const [name, value] of [['DisplayName', 'Olive'], ['IconUri', path.join(ASSETS, 'icon.png')]]) {
-    execFile('reg', ['add', key, '/v', name, '/t', 'REG_SZ', '/d', value, '/f'], { windowsHide: true }, () => {});
-  }
 }
 
 function showWindow() {
@@ -398,7 +386,6 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', showWindow);
 
   app.whenReady().then(() => {
-    registerAppName();
     readUpdateResult();
     fixLoginItem();
     upgradeLoginItem();
