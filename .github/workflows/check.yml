@@ -1,0 +1,33 @@
+# Checks every push and pull request: installs the dependencies, builds the window (src/ui) and syntax-checks the
+# main process and audio engine. The full audio and installer tests need a real Windows desktop, so they stay local
+# (npm run test:audio, npm run test:installer).
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - name: Build the window
+        run: npm run build:ui
+      - name: Syntax-check the main process and the audio engine
+        shell: bash
+        run: |
+          for f in src/main/*.js src/renderer/audio-engine.js tools/*.js; do node --check "$f" || exit 1; done
+          for f in src/renderer/*-worklet.js src/renderer/rnnoise-start.js; do node --check --input-type=module < "$f" || exit 1; done
