@@ -32,6 +32,18 @@ namespace OliveSetup
             DeleteValue(Common.ApprovedKey, Common.LoginEntry);
         }
 
+        // The name and icon Windows shows on Olive's notifications (main.js registers them). Only if they're this copy's.
+        static void RemoveAppName(string dir)
+        {
+            string key = @"Software\Classes\AppUserModelId\" + Common.LoginEntry, icon = null;
+            using (RegistryKey k = Registry.CurrentUser.OpenSubKey(key))
+            {
+                if (k != null) icon = k.GetValue("IconUri") as string;
+            }
+            if (icon == null || icon.IndexOf(dir.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase) < 0) return;
+            Registry.CurrentUser.DeleteSubKeyTree(key, false);
+        }
+
         static void DeleteFile(string path)
         {
             if (File.Exists(path)) File.Delete(path);
@@ -73,6 +85,7 @@ namespace OliveSetup
             }
             Common.CloseRunning(dir, false);
             RemoveLoginEntry(dir);
+            RemoveAppName(dir);
             DeleteFile(Common.StartMenuShortcut);
             DeleteFile(Common.DesktopShortcut);
             Registry.CurrentUser.DeleteSubKeyTree(Common.UninstallKey, false);

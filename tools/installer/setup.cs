@@ -110,6 +110,13 @@ namespace OliveSetup
             }
             CreateShortcut(Common.StartMenuShortcut, exe, "Olive microphone manager");
             if (desktop) CreateShortcut(Common.DesktopShortcut, exe, "Olive microphone manager");
+            // The name and icon Windows puts on Olive's notifications. It looks them up by the app's ID (Electron's
+            // electron.app.<name>, the same as the Start with Windows entry); with nothing here it showed the raw ID.
+            using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\AppUserModelId\" + Common.LoginEntry))
+            {
+                k.SetValue("DisplayName", "Olive");
+                k.SetValue("IconUri", Path.Combine(dir, "resources", "app", "assets", "icon.png"));
+            }
             // Start with Windows stays as you set it, but must point at this copy from now on.
             using (RegistryKey run = Registry.CurrentUser.OpenSubKey(Common.RunKey, true))
             {

@@ -2,6 +2,10 @@
 
 What changed in each release of Olive. Downloads are on the [Releases](https://github.com/Zaytoonic/Olive/releases) page.
 
+## 2.0.1 (25 November 2026)
+
+- The notice when you close the window is headed "Olive" with Olive's icon (it said "electron.app.Olive"), and is one short line.
+
 ## 2.0.0 (25 November 2026)
 
 - High quality noise reduction: the HQ button next to Noise reduction switches to DeepFilterNet3, which keeps your voice more natural, at about twice the CPU of the standard engine (about 1% of a typical PC). Its strength slider caps how much any sound is turned down, so a laugh can be ducked but not cut out.

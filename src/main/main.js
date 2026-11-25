@@ -127,21 +127,16 @@ ipcMain.handle('startup:set', (event, on) => {
 let win = null, tray = null, quitting = false;
 const notices = [];                            // problems from starting up, for the page to show
 
-// Every time the window is closed, say where Olive went. The first time explains it in full; after that, a short reminder.
-const trayHintFile = () => path.join(app.getPath('userData'), 'tray-hint-shown');
+// Every time the window is closed, say where Olive went. The installer registers the name and icon Windows heads it with.
 function showTrayHint() {
   if (!tray || process.platform !== 'win32') return;
-  const seenBefore = fs.existsSync(trayHintFile());
-  if (!seenBefore) try { fs.writeFileSync(trayHintFile(), ''); } catch {}
   const size = Math.round(32 * screen.getPrimaryDisplay().scaleFactor);
   tray.displayBalloon({
     icon: nativeImage.createFromPath(path.join(ASSETS, 'icon.png')).resize({ width: size, height: size, quality: 'best' }),
     largeIcon: true,
     noSound: true,
-    title: 'Still running in the background',
-    content: seenBefore
-      ? 'Olive is in the tray by the clock (it may be under the ^ arrow). Right-click it and choose Quit to close it fully.'
-      : 'Your mic settings stay on. To open Olive, click its icon by the clock (it may be under the ^ arrow). To close it fully, right-click that icon and choose Quit.'
+    title: 'Olive is still running',
+    content: 'Right-click its tray icon and choose Quit to close it.'
   });
 }
 
