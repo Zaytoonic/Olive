@@ -15,7 +15,7 @@ const TAG = 'Test' + process.pid;
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'olive-install-test-'));
 const dir = path.join(temp, 'Program Folder', 'Olive');
 const RUN = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', APPROVED = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run';
-const LOGIN = `electron.app.Olive${TAG}`, UNINSTALL = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Olive${TAG}`;
+const LOGIN = `electron.app.Olive${TAG}`, APPNAME_KEY = `HKCU\\Software\\Classes\\AppUserModelId\\${LOGIN}`, UNINSTALL = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Olive${TAG}`;
 const appData = process.env.APPDATA;
 const startMenu = path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', `Olive${TAG}.lnk`);
 const desktop = path.join(execFileSync('powershell.exe', ['-NoProfile', '-Command', "[Environment]::GetFolderPath('DesktopDirectory')"], { encoding: 'utf8' }).trim(), `Olive${TAG}.lnk`);
@@ -180,6 +180,8 @@ async function updateChecks(exe, profile) {
     for (let i = 0; i < 30 && count === '0'; i++) { await sleep(500); count = procs(); }
     await sleep(3000);
     check('the installed app starts', count !== '0', `${count} processes`);
+    const named = reg('query', APPNAME_KEY) || '';
+    check('its notifications are headed "Olive" with its icon', /DisplayName\s+REG_SZ\s+Olive\s/.test(named) && named.includes(path.join(dir, 'resources', 'app', 'assets', 'icon.png')), named ? 'registered' : 'not registered');
     fs.writeFileSync(path.join(dir, 'left-over-from-old-version.txt'), 'x');
     const again = runSetup();
     check('upgrading works while it is running', again.code === 0, `exit ${again.code} ${again.log}`);
@@ -198,6 +200,7 @@ async function updateChecks(exe, profile) {
     check('shortcuts are removed', !fs.existsSync(startMenu) && !fs.existsSync(desktop), 'gone');
     check('it leaves Windows installed apps', reg('query', UNINSTALL) === null, 'gone');
     check('Start with Windows is removed', reg('query', RUN, '/v', LOGIN) === null, 'gone');
+    check('the notification name is removed', reg('query', APPNAME_KEY) === null, 'gone');
     check('settings stay unless you ask', fs.existsSync(path.join(settings, 'keep.txt')), 'kept');
 
     runSetup();
@@ -208,6 +211,7 @@ async function updateChecks(exe, profile) {
     check('the test finished', false, err.message);
   }
   for (const [key, name] of [[RUN, LOGIN], [APPROVED, LOGIN]]) reg('delete', key, '/v', name, '/f');
+  reg('delete', APPNAME_KEY, '/f');
   reg('delete', UNINSTALL, '/f');
   for (const f of [startMenu, desktop]) fs.rmSync(f, { force: true });
   fs.rmSync(settings, { recursive: true, force: true });
