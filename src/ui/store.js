@@ -10,7 +10,7 @@ import { pref, loadPrefs, savePrefs, scheduleSave } from './prefs.js';
 import { hotkeyChoosing, pttChoosing, talking, talkFade, initMuteHotkey, initPtt } from './keys.js';
 import { initBadge, initUpdates, initStartup } from './app-settings.js';
 import { isHidden, resetLevel, syncTicker } from './meters.js';
-import { switchEqTo, presetShown } from './eq.js';
+import { switchEqTo, presetShown, startFromPreset } from './eq.js';
 import { isCableLabel, sendHint, updateSendStatus, setSend, setFreshInstall, updateSetup } from './cable.js';
 import { boardChanged, boardEngineCfg, initBoard } from './board.js';
 
@@ -73,8 +73,6 @@ export function setGateDb(v) { state.gateDb = v; updateGate(); scheduleSave(); }
 export function setGateAuto(on) { state.gateAuto = on; updateGate(); savePrefs(); }
 export function setNr(on) { state.nr = on; applyNr(); updateHints(); savePrefs(); }
 export function setNrAmount(v) { state.nrAmount = v; applyNr(); updateHints(); scheduleSave(); }
-// The "High quality" trial: DeepFilterNet3 instead of RNNoise (audio-engine.js switches the chains over).
-export function setHighQuality(on) { state.nrEngine = on ? 'deepfilter' : 'rnnoise'; engine.set({ nrEngine: state.nrEngine }); updateHints(); savePrefs(); }
 export function setMono(on) { state.mono = on; applyMono(); savePrefs(); }
 export function setSendWanted(on) { pref.send = on; savePrefs(); setSend(on); }
 export function setMonitorVol(v) { state.monitorVol = v; engine.set({ monitorVol: v }); updateHints(); scheduleSave(); }
@@ -157,10 +155,7 @@ export function updateHints() {
   ui({
     nrHint: !state.nr ? ''
       : st.nrFailed ? "Couldn't start"
-      : st.voiceFailed ? 'Using the backup engine'
-      : state.nrEngine === 'deepfilter' && st.dfnFailed ? "HQ couldn't start: using Standard"
-      : state.nrEngine === 'deepfilter' && st.engine !== 'deepfilter' ? 'Starting HQ…'
-      : st.engine === 'deepfilter' ? 'HQ: more natural voice, about twice the CPU'
+      : st.voiceFailed ? "Using the backup engine: the main one couldn't start"
       : '',
     monHint: !state.monitor ? '' : engine.capturing ? 'Use headphones' : 'No microphone',
     ...(engine.micTest ? {} : { testDisabled: !engine.capturing })
@@ -403,6 +398,7 @@ export function pressTest() {
 export function start() {
   const savedPrefs = loadPrefs();
   setFreshInstall(!savedPrefs);
+  if (!savedPrefs) startFromPreset('voice');      // new installs: the Clear voice EQ (saved settings, yours included, are kept)
   if (state.send) sendHint('Connecting…');
   ui({ sendOn: state.send, eqPreset: presetShown() });
   renderDevices();
@@ -410,7 +406,7 @@ export function start() {
   engine.set({
     inputGain: volFactor(), gateDb: state.gateDb, gateAuto: state.gateAuto, nr: state.nr, nrAmount: state.nrAmount, mono: state.mono,
     comp: state.comp, compAmount: state.compAmount, eq, monitor: state.monitor, monitorVol: state.monitorVol,
-    talking: talking(), talkFade: talkFade(), send: state.send, nrEngine: state.nrEngine, ...boardEngineCfg()
+    talking: talking(), talkFade: talkFade(), send: state.send, ...boardEngineCfg()
   });
   engine.init(EQ_BANDS);
   initBoard();

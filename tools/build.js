@@ -32,4 +32,10 @@ let removed = 0;
 if (fs.existsSync(path.join(locales, 'en-US.pak'))) {
   for (const f of fs.readdirSync(locales)) if (f !== 'en-US.pak') { fs.rmSync(path.join(locales, f)); removed++; }
 }
-console.log(`Built Olive ${pkg.version} -> ${path.relative(root, appDir)}${removed ? ` (removed ${removed} unused language files)` : ''}`);
+// Olive runs without hardware graphics (main.js) and draws nothing in 3D: these are WebGPU's shader compiler (dxcompiler),
+// the software Vulkan driver and its loader, and ANGLE's Direct3D shader compiler. Without them: 35 MB less on disk and
+// in the installer; checked by starting the built app and drawing its window, meters and EQ graph (Nov 2026).
+const graphics = ['dxcompiler.dll', 'vk_swiftshader.dll', 'vk_swiftshader_icd.json', 'vulkan-1.dll', 'd3dcompiler_47.dll'];
+let dropped = 0;
+for (const f of graphics) { const p = path.join(root, 'dist', 'Olive', f); if (fs.existsSync(p)) { fs.rmSync(p); dropped++; } }
+console.log(`Built Olive ${pkg.version} -> ${path.relative(root, appDir)}${removed ? ` (removed ${removed} unused language files)` : ''}${dropped ? ` (removed ${dropped} unused graphics files)` : ''}`);

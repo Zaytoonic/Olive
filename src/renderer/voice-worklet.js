@@ -1,114 +1,54 @@
-// Voice cleanup on the audio thread (AudioWorklet): RNNoise, a small neural network trained on speech and noise.
-// One processor does both jobs below, because the network's voice detection and its cleaned audio arrive together.
-// - Noise: the network cleans each 10 ms frame. Strength (0-100) blends the cleaned audio with the raw mic, time-aligned:
-//   0 is the raw mic untouched, 100 is fully cleaned, and the raw part falls 0.3 dB per percent in between.
-// - Gate: opens on detected voice instead of volume, so a fan gust isn't mistaken for a word. It stays open HOLD_MS after
-//   the last voice, and because the network's audio lags its detection by a frame, it is already open when a word starts.
-// RNNoise only works at 48 kHz, and needs samples scaled to 16-bit range. At other rates audio passes through unchanged.
-//
-// The network is vendor/rnnoise.wasm: xiph's RNNoise at tag v0.2 (14 April 2024) with its model 0b50c45, built by
-// tools/build-rnnoise.js. The later weights (Aug 2024 - Jan 2025) treated laughs and parts of words as noise.
-// The page compiles the wasm and passes it in processorOptions.wasm, and startRnnoise below starts it. It also starts
-// the previous build (Emscripten, from @shiguredo/rnnoise-wasm), so an older wasm still works.
-function startRnnoise(module) {
-  let memory = null;
-  const fdWrite = (fd, iov, count, written) => {         // RNNoise doesn't print; this only reports the bytes as taken
-    const u32 = new Uint32Array(memory.buffer);
-    let n = 0;
-    for (let i = 0; i < count; i++) n += u32[(iov >>> 2) + i * 2 + 1];
-    u32[written >>> 2] = n;
-    return 0;
-  };
-  const known = {
-    env: {
-      __assert_fail: () => { throw new Error('RNNoise assertion failed'); },
-      emscripten_resize_heap: size => {
-        const pages = Math.ceil(((size >>> 0) - memory.buffer.byteLength) / 65536);
-        try { memory.grow(pages); return 1; } catch { return 0; }
-      }
-    },
-    wasi_snapshot_preview1: { fd_write: fdWrite, proc_exit: () => { throw new Error('RNNoise exited'); } }
-  };
-  // Any other import is stdio or the environment, which RNNoise never calls: answered with 0 (success, nothing done).
-  const imports = {};
-  for (const { module: m, name, kind } of WebAssembly.Module.imports(module)) {
-    if (kind !== 'function') continue;
-    (imports[m] = imports[m] || {})[name] = (known[m] && known[m][name]) || (() => 0);
-  }
-  const { exports } = new WebAssembly.Instance(module, imports);
-  memory = exports.memory;
-  if (exports._initialize) exports._initialize();         // a reactor (tools/build-rnnoise.js)
-  else { exports.emscripten_stack_init(); exports.__wasm_call_ctors(); }   // the Emscripten build
-  if (exports.rnnoise_get_frame_size() !== FRAME) throw new Error('unexpected RNNoise frame size');
-  return {
-    create: () => exports.rnnoise_create(0),           // 0: the built-in model
-    malloc: bytes => exports.malloc(bytes),
-    process: (net, out, inp) => exports.rnnoise_process_frame(net, out, inp),
-    heap: () => new Float32Array(memory.buffer)        // made again each time: growing the memory detaches the old view
-  };
-}
+// Voice cleanup on the audio thread (AudioWorklet): DeepFilterNet3 cleans the voice, RNNoise listens for it.
+// - Noise: DeepFilterNet3 (vendor/deepfilter, built by tools/build-deepfilter.js) is a 48 kHz network that cleans each
+//   10 ms frame in two stages, gains per frequency band and then a filter below 5 kHz that rebuilds the voice's
+//   harmonics. Strength sets its attenuation limit: nothing is turned down more than strength x 0.3 dB (100% = no limit),
+//   so a laugh it takes for noise can only be ducked. At 0 (noise reduction off) it doesn't run: the raw mic passes, on time.
+// - Gate: opens on detected voice, not volume, so a fan gust or a keyboard isn't taken for a word. The voice probability
+//   comes from RNNoise (vendor/rnnoise.wasm, via rnnoise-start.js), which only runs while the gate is on. It is known
+//   before DeepFilterNet's output of the same audio (which lags 40 ms), so the gate is open when a word starts, and it
+//   stays open HOLD_MS after the last voice. On Olive's room recording (Nov 2026) DeepFilterNet3 alone left the room's
+//   noise at -63 dB between words; with this gate the pauses were silent and the voice was kept just as well (-0.5 dB).
+// - Mono: the networks run once, on the channels' average, and every output channel gets the result.
+// Both networks need 48 kHz; at other rates audio passes through unchanged. The page compiles both wasm files and fetches
+// the model, and passes them in processorOptions (a worklet can't fetch files itself).
+import './dfn-polyfill.js';
+import { initSync, df_create, df_process_frame, df_set_atten_lim, df_set_post_filter_beta } from './vendor/deepfilter/df.js';
+import { startRnnoise } from './rnnoise-start.js';
 
 const FRAME = 480;
-const SCALE = 32768;
-const NET_DELAY = 960;                 // the network's own delay, on top of collecting a frame (measured by correlation)
-const DRY_DELAY = FRAME + NET_DELAY;
-// The network's voice probability that opens the gate. This model sometimes scores noise near 0.5 (the old one never
-// did), and each such frame held the gate open for HOLD_MS; at 0.8 noise stays shut and every word start still opens it.
+const DELAY = 1920;                    // DeepFilterNet's 1440 samples (STFT and 2 frames of look-ahead) + collecting a frame
+// The voice probability that opens the gate: at 0.8 noise stays shut and every word start still opens it.
 const VOICE_ON = 0.8;
 const HOLD_MS = 300;
 const RISE_MS = 2, FALL_MS = 80;
-
-class ChannelState {
-  constructor(rnn) {
-    this.rnn = rnn;
-    this.net = rnn.create();
-    this.inPtr = rnn.malloc(FRAME * 4);
-    this.outPtr = rnn.malloc(FRAME * 4);
-    this.input = new Float32Array(FRAME);
-    this.filled = 0;
-    this.wet = new Float32Array(DRY_DELAY + FRAME);    // cleaned audio waiting to go out; starts with a frame of silence
-    this.wetRead = 0; this.wetWrite = FRAME;
-    this.dry = new Float32Array(DRY_DELAY);
-    this.dryPos = 0;
-  }
-
-  // Runs the network on a full frame; returns its voice probability (0-1).
-  run() {
-    const inIdx = this.inPtr >> 2, outIdx = this.outPtr >> 2;
-    const heap = this.rnn.heap();
-    for (let i = 0; i < FRAME; i++) heap[inIdx + i] = this.input[i] * SCALE;
-    const voice = this.rnn.process(this.net, this.outPtr, this.inPtr);
-    const out = this.rnn.heap();
-    for (let i = 0; i < FRAME; i++) {
-      this.wet[this.wetWrite] = out[outIdx + i] / SCALE;
-      this.wetWrite = (this.wetWrite + 1) % this.wet.length;
-    }
-    this.filled = 0;
-    return voice;
-  }
-}
+const limitFor = strength => (strength >= 100 ? 100 : Math.max(0.5, strength * 0.3));   // below 0.01 dB it skips its STFT (and its delay)
 
 class VoiceCleanup extends AudioWorkletProcessor {
   static get parameterDescriptors() {
     return [
-      { name: 'strength', defaultValue: 0, minValue: 0, maxValue: 100, automationRate: 'k-rate' },
+      { name: 'strength', defaultValue: 100, minValue: 0, maxValue: 100, automationRate: 'k-rate' },
       { name: 'gate', defaultValue: 1, minValue: 0, maxValue: 1, automationRate: 'k-rate' }    // 1 = gate on detected voice
     ];
   }
 
   constructor(options) {
     super();
-    // Throws if the wasm is missing or won't start; the page then sees a processor error and falls back.
-    this.rnn = startRnnoise(options.processorOptions.wasm);
+    // Throws if a wasm or the model is missing or won't start; the page then sees a processor error and falls back.
+    const { wasm, model, rnnoise } = options.processorOptions;
     this.supported = sampleRate === 48000;
-    this.channels = [];
-    this.gain = 0;
-    this.hold = 0;
+    initSync({ module: wasm });
+    this.df = df_create(new Uint8Array(model), 100);     // about 0.4 s, once
+    df_set_post_filter_beta(this.df, 0);                 // the post-filter only adds suppression (measured: 0.6 dB more on room noise)
+    this.voiceOf = startRnnoise(rnnoise);
+    this.limit = 100;
+    this.input = new Float32Array(FRAME);
+    this.cur = new Float32Array(FRAME);                  // the cleaned frame being played; starts as a frame of silence
+    this.dry = new Float32Array(DELAY);                  // the raw mic, DELAY behind, for noise reduction off
+    this.pos = 0; this.dryPos = 0;
+    this.gain = 0; this.hold = 0; this.open = false; this.frameVoice = 0;
     this.holdSamples = Math.round(sampleRate * HOLD_MS / 1000);
     this.gainUp = Math.exp(-1 / (sampleRate * RISE_MS / 1000));
     this.gainDown = Math.exp(-1 / (sampleRate * FALL_MS / 1000));
-    this.open = false;
-    this.frameVoice = 0;
     this.port.postMessage({ supported: this.supported, open: false });
     // A processor that returns true keeps running even once nothing is connected to it; the engine sends 'stop' when it takes one out.
     this.port.onmessage = e => { if (e.data === 'stop') this.stopped = true; };
@@ -118,37 +58,35 @@ class VoiceCleanup extends AudioWorkletProcessor {
     if (this.stopped) return false;
     const input = inputs[0], output = outputs[0];
     if (!output || !output.length) return true;
+    const src = input && input.length ? input : null, chans = src ? src.length : 0;
     if (!this.supported) {
-      for (let c = 0; c < output.length; c++) if (input && input[c]) output[c].set(input[c]);
+      for (let c = 0; c < output.length; c++) if (src) output[c].set(src[c] || src[0]);
       return true;
     }
-    const strength = parameters.strength[0], gateOn = parameters.gate[0] >= 0.5;
-    const dryGain = strength >= 100 ? 0 : Math.pow(10, -strength * 0.3 / 20);
-    const wetGain = strength <= 0 ? 0 : 1 - dryGain;
-    while (this.channels.length < output.length) this.channels.push(new ChannelState(this.rnn));
-    const n = output[0].length;
+    const strength = parameters.strength[0], gateOn = parameters.gate[0] >= 0.5, off = strength <= 0;
+    if (!off) { const lim = limitFor(strength); if (lim !== this.limit) { this.limit = lim; df_set_atten_lim(this.df, lim); } }
+    const n = output[0].length, up = this.gainUp, down = this.gainDown, nch = output.length;
+    let gain = this.gain, hold = this.hold, pos = this.pos, d = this.dryPos;
     for (let i = 0; i < n; i++) {
-      let voice = -1;
-      for (let c = 0; c < output.length; c++) {
-        const ch = this.channels[c], src = input && input.length ? (input[c] || input[0]) : null, x = src ? src[i] : 0;
-        ch.input[ch.filled++] = x;
-        if (ch.filled === FRAME) voice = Math.max(voice, ch.run());
+      let x = 0;
+      for (let c = 0; c < chans; c++) x += src[c][i];
+      if (chans > 1) x /= chans;
+      this.input[pos] = x;
+      const dry = this.dry[d]; this.dry[d] = x; if (++d === DELAY) d = 0;
+      const y = off ? dry : this.cur[pos];
+      if (++pos === FRAME) {
+        pos = 0;
+        if (gateOn) { const v = this.voiceOf(this.input); this.frameVoice = v; if (v >= VOICE_ON) hold = this.holdSamples; }
+        if (!off) this.cur = df_process_frame(this.df, this.input);
       }
-      if (voice >= 0) {
-        this.frameVoice = voice;
-        if (voice >= VOICE_ON) this.hold = this.holdSamples;
-      }
-      if (this.hold > 0) this.hold--;
-      const target = !gateOn || this.hold > 0 ? 1 : 0;
-      this.gain = target > this.gain ? this.gainUp * this.gain + (1 - this.gainUp) * target : this.gainDown * this.gain + (1 - this.gainDown) * target;
-      for (let c = 0; c < output.length; c++) {
-        const ch = this.channels[c], src = input && input.length ? (input[c] || input[0]) : null;
-        const wet = ch.wet[ch.wetRead]; ch.wetRead = (ch.wetRead + 1) % ch.wet.length;
-        const dry = ch.dry[ch.dryPos]; ch.dry[ch.dryPos] = src ? src[i] : 0; ch.dryPos = (ch.dryPos + 1) % DRY_DELAY;
-        output[c][i] = (wet * wetGain + dry * dryGain) * this.gain;
-      }
+      if (hold > 0) hold--;
+      const target = !gateOn || hold > 0 ? 1 : 0;
+      gain = target > gain ? up * gain + (1 - up) * target : down * gain + (1 - down) * target;
+      const out = y * gain;
+      for (let c = 0; c < nch; c++) output[c][i] = out;
     }
-    const open = !gateOn || this.hold > 0;
+    this.gain = gain; this.hold = hold; this.pos = pos; this.dryPos = d;
+    const open = !gateOn || hold > 0;
     if (open !== this.open) { this.open = open; this.port.postMessage({ open }); }
     return true;
   }

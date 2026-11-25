@@ -11,10 +11,9 @@ export const ampToDb = a => (a <= 0 ? -Infinity : 20 * Math.log10(a));
 export const state = {
   deviceId: null,
   volume: 75, muted: false, gateDb: -45, gateAuto: true,
-  nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: true, send: true, comp: false, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M', eqOpen: false,
+  nr: true, nrAmount: 100, monitor: false, monitorVol: 80, mono: true, send: true, comp: true, compAmount: 50, muteHotkey: true, muteAccel: 'Control+Alt+M', eqOpen: false,
   ptt: false, pttKey: null, outputId: 'default', outputName: null, setupDone: false, updateAuto: true,
   muteSounds: true, muteSoundVol: 100, badge: true, badgeCorner: 'top-left',
-  nrEngine: 'rnnoise',     // or 'deepfilter': the "High quality" trial
   board: [], boardVol: 80, boardLocal: true, boardLocalVol: 80, boardWhileMuted: true, boardStopKey: null
 };
 export let view = {

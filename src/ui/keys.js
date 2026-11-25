@@ -1,6 +1,7 @@
 // Keys that mute or talk: the laptop's mic key, the mute hotkey (also used by the tray), and push to talk.
 import { state, ui, cleanErr } from './core.js';
 import { savePrefs } from './prefs.js';
+import { soundboardKeyOwner } from './board.js';
 import { resetGateChip } from './meters.js';
 import { updateSendStatus } from './cable.js';
 import {
@@ -72,6 +73,9 @@ export async function startChoosingHotkey() {
 async function finishChoosingHotkey(accelerator) {
   setHotkeyChoosing(false);
   if (!accelerator) return applyMuteHotkey();
+  // Olive's own soundboard keys hold their shortcut too; say which, instead of blaming another app.
+  const sound = soundboardKeyOwner(accelerator);
+  if (sound) { await applyMuteHotkey(); ui({ muteKeyHint: `${hotkeyLabel(accelerator)} plays ${sound === 'Stop all' ? 'Stop all' : sound} on the soundboard. Keeping ${hotkeyLabel(state.muteAccel)}` }); return; }
   if (await window.appMute.setHotkey(accelerator)) {
     state.muteAccel = accelerator;
     savePrefs();
