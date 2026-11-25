@@ -10,6 +10,11 @@ export const EQ_BANDS = [
 export const EQ_F_MIN = 20, EQ_F_MAX = 20000, EQ_G_MAX = 12, EQ_RANGE = 15, EQ_Q_MIN = 0.3, EQ_Q_MAX = 8;
 // A preset value is a gain in dB, or { g, f, q } to also set frequency and width.
 export const EQ_PRESETS = {
+  // New installs start here: a forward, easy-to-follow voice on most mics. Low cut and a little less bass for rumble and
+  // boom, less 300 Hz mud, +4 dB presence at 3 kHz (what lets speech cut through game audio), a touch of brilliance kept
+  // small so S sounds don't hiss, and some air. Boosts stay at +4 dB or less, leaving headroom for loud moments.
+  voice:     { bass: { g: -2, f: 120 }, lowmid: { g: -3, f: 300, q: 1 }, mid: 0, presence: { g: 4, f: 3000, q: 0.9 },
+               brilliance: { g: 1.5, f: 6000, q: 1.2 }, air: { g: 2, f: 10000 }, lowCut: true },
   // Fitted to your recording (Nov 2026): fills the 400-1000 Hz dip, tames the very bright 4-10 kHz range,
   // keeps a little extra clarity; low cut off because your voice goes down to ~74 Hz.
   myvoice:   { bass: 0, lowmid: { g: 3, f: 420, q: 0.7 }, mid: { g: 6, f: 800, q: 1.6 }, presence: { g: -5, f: 4000, q: 0.7 },
@@ -20,7 +25,7 @@ export const EQ_PRESETS = {
   boom:      { bass: -6, lowmid: -3, mid: 0,  presence: 1, brilliance: 0, air: 0, lowCut: true }
 };
 export const PRESET_NAMES = [
-  ['myvoice', 'My voice (tuned)'], ['flat', 'Flat'], ['clarity', 'Voice clarity'], ['broadcast', 'Broadcast'], ['boom', 'Reduce boom']
+  ['voice', 'Clear voice'], ['myvoice', 'My voice (tuned)'], ['flat', 'Flat'], ['clarity', 'Voice clarity'], ['broadcast', 'Broadcast'], ['boom', 'Reduce boom']
 ];
 
 export const eq = { on: true, lowCut: false, b: {} };          // b[key] = { f: Hz, g: dB, q }

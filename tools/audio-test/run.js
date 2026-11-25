@@ -138,29 +138,34 @@ function gateChecks(fixture) {
   }
 }
 
-// ---- The voice engine (RNNoise), offline ----
-const VOICE_DELAY = 1440;
-function loadVoice() {
-  const ctx = vm.createContext({ AudioWorkletProcessor: class { constructor() { this.port = { postMessage() {} }; } }, sampleRate: SR, Math, Float32Array, Uint32Array, Infinity, WebAssembly, Error, console, registerProcessor: (_, c) => { ctx.Proc = c; } });
-  ctx.globalThis = ctx;
-  vm.runInContext(fs.readFileSync(path.join(RENDERER, 'voice-worklet.js'), 'utf8'), ctx);
-  voiceWasm = voiceWasm || new WebAssembly.Module(fs.readFileSync(path.join(RENDERER, 'vendor', 'rnnoise.wasm')));
-  return new ctx.Proc({ processorOptions: { wasm: voiceWasm } });
+// ---- The voice engine (DeepFilterNet3 cleaning, RNNoise's voice detection gating), offline ----
+// voice-worklet.js is an ES module (it imports DeepFilterNet's glue and rnnoise-start.js), loaded here as the audio
+// thread would: with the worklet globals it expects, and the two networks and the model handed in.
+const VOICE_DELAY = 1920;
+let VoiceProc = null, voiceFiles = null;
+async function loadVoiceModule() {
+  if (VoiceProc) return;
+  Object.assign(globalThis, { sampleRate: SR, AudioWorkletProcessor: class { constructor() { this.port = { postMessage() {}, onmessage: null }; } }, registerProcessor: (_, c) => { VoiceProc = c; } });
+  await import(require('url').pathToFileURL(path.join(RENDERER, 'voice-worklet.js')).href);
+  voiceFiles = { wasm: new WebAssembly.Module(fs.readFileSync(path.join(RENDERER, 'vendor', 'deepfilter', 'df_bg.wasm'))), rnnoise: new WebAssembly.Module(fs.readFileSync(path.join(RENDERER, 'vendor', 'rnnoise.wasm'))), model: new Uint8Array(fs.readFileSync(path.join(RENDERER, 'vendor', 'deepfilter', 'DeepFilterNet3_onnx.tar.gz'))) };
 }
-let voiceWasm = null;
+function loadVoice() { return new VoiceProc({ processorOptions: { wasm: voiceFiles.wasm, rnnoise: voiceFiles.rnnoise, model: voiceFiles.model.slice().buffer } }); }
 function runVoice(input, strength, gate) {
   const p = loadVoice(), out = new Float32Array(input.length), params = { strength: new Float32Array([strength]), gate: new Float32Array([gate]) };
   for (let i = 0; i + 128 <= input.length; i += 128) { const o = new Float32Array(128); p.process([[input.subarray(i, i + 128)]], [[o]], params); out.set(o, i); }
   return out;
 }
-function voiceChecks() {
+async function voiceChecks() {
+  await loadVoiceModule();
   console.log('\nVoice engine, offline');
   const n = SR * 24, D = VOICE_DELAY, noise = makeNoise(n), fan = makeGustyFan(n);
   const dry = runVoice(noise, 0, 0); let err = 0, pow = 0;
   for (let i = SR; i < n - D; i++) { err += (dry[i + D] - noise[i]) ** 2; pow += noise[i] ** 2; }
   check('0% leaves audio unchanged', toDb(err) - toDb(pow) < -80, `difference ${f1(toDb(err) - toDb(pow))} dB relative to the signal`);
   const level = (x, d = 0) => { let e = 0; for (let i = SR * 3; i < n - D; i++) e += x[i + d] ** 2; return toDb(e); };
-  for (const [name, src, min60, min100] of [['steady noise', noise, 12, 20], ['gusty fan', fan, 8, 8]]) {
+  // DeepFilterNet3 alone takes about 17 dB off this steady synthetic noise (RNNoise took 45); the voice gate below silences
+  // what's left between words, as it did on a real room (Nov 2026: pauses silent, voice -0.5 dB).
+  for (const [name, src, min60, min100] of [['steady noise', noise, 12, 15], ['gusty fan', fan, 8, 8]]) {
     const drops = [25, 60, 100].map(v => level(src) - level(runVoice(src, v, 0), D));
     check(`${name} comes down`, drops[1] >= min60 && drops[2] >= min100, `drop at 25/60/100%: ${drops.map(f1).join(' / ')} dB (at least ${min60} at 60%, ${min100} at 100%)`);
   }
@@ -461,7 +466,7 @@ async function liveChecks(profile, wav, fixture) {
     if (wanted('app')) {
       console.log('\nA new install');
       const fresh = await copy.call(() => ({ gains: EQ_BANDS.map(d => eq.b[d.key].g), preset: $('eqPreset').value, comp: state.comp }));
-      check('a new install starts flat, with the compressor off', fresh.gains.every(g => g === 0) && fresh.preset === 'flat' && fresh.comp === false, `gains ${fresh.gains.join()}, preset ${fresh.preset}, compressor ${fresh.comp}`);
+      check('a new install starts with the Clear voice EQ and the compressor on', fresh.gains.join() === '-2,-3,0,4,1.5,2' && fresh.preset === 'voice' && fresh.comp === true, `gains ${fresh.gains.join()}, preset ${fresh.preset}, compressor ${fresh.comp}`);
       console.log('\nStart with Windows');
       const startup = await copy.call(async () => { await openSettings(); const r = { api: await window.appStartup.get(), disabled: $('startupToggle').disabled, hint: $('startupHint').textContent }; await closeSettings(); return r; });
       check('a copy run from source cannot register itself at login', startup.api.supported === false && startup.disabled, `toggle disabled: ${startup.disabled}, hint: "${startup.hint}"`);
@@ -967,49 +972,13 @@ async function liveChecks(profile, wav, fixture) {
         playSound(state.board[0].id); await wait(100);
         out.playing = engine.clipsPlaying().length === 1;
         stopSounds();
-        removeSound(state.board[0].id); await wait(300);
+        removeSound(state.board[0].id); clearBoardKey('stop'); await wait(300);   // leaves no shortcut held for later checks
         out.after = state.board.length; out.saved = JSON.parse(localStorage.getItem(PREFS_KEY)).board.length;
         return out;
       });
       check('after a restart the sound is still there and plays', JSON.stringify(r.names) === '["Horn"]' && r.playing, `${JSON.stringify(r.names)}, playing ${r.playing}`);
       const left = fs.existsSync(sounds) ? fs.readdirSync(sounds) : [];
       check('removing a sound deletes Olive\'s copy and forgets it', r.after === 0 && r.saved === 0 && left.length === 0, `${r.after} in the list, ${r.saved} saved, ${left.length} files left`);
-    }
-
-    if (wanted('hq')) {
-      console.log('\nHigh quality noise reduction (DeepFilterNet3, trial)');
-      const hq = await copy.call(async () => {
-        const wait = ms => new Promise(r => setTimeout(r, ms)), out = {};
-        clearTimeout(startupRetryTimer); startupRetries = 99;
-        const peak = async (secs, node = engine.mainChain.outGain) => {     // loudest sample leaving the chain
-          const a = engine.audioCtx.createAnalyser(), b = new Float32Array(2048); a.fftSize = 2048; node.connect(a);
-          let pk = 0; const t0 = performance.now();
-          while (performance.now() - t0 < secs * 1000) { a.getFloatTimeDomainData(b); for (const v of b) pk = Math.max(pk, Math.abs(v)); await wait(20); }
-          node.disconnect(a); return 20 * Math.log10(pk + 1e-9);
-        };
-        state.nr = true; state.nrAmount = 100; applyNr(); state.gateAuto = true; updateGate(); setMonitor(true);
-        await wait(1500);
-        out.before = engine.status().engine;
-        const t0 = performance.now();
-        setHighQuality(true);
-        for (let i = 0; i < 100 && engine.status().engine !== 'deepfilter'; i++) await wait(100);
-        out.startMs = Math.round(performance.now() - t0);
-        out.on = engine.status().engine; out.failed = engine.status().dfnFailed; out.hint = getView().nrHint;
-        out.saved = JSON.parse(localStorage.getItem(PREFS_KEY)).nrEngine;
-        await wait(7000);                              // the level gate learns the floor of the cleaned audio (6 s window)
-        out.peak = await peak(14);                     // longer than the test file's 8 s of noise: its speech comes through
-        out.gateWorks = !!engine.mainChain.gate && !engine.mainChain.voice;
-        setHighQuality(false);
-        for (let i = 0; i < 50 && engine.status().engine !== 'rnnoise'; i++) await wait(100);
-        out.back = engine.status().engine;
-        await wait(1500);
-        out.backPeak = await peak(10);
-        setMonitor(false);
-        return out;
-      });
-      check('High quality switches to DeepFilterNet3, and is saved', hq.before === 'rnnoise' && hq.on === 'deepfilter' && !hq.failed && hq.saved === 'deepfilter', `${hq.before} -> ${hq.on} in ${hq.startMs} ms, saved "${hq.saved}", "${hq.hint}"`);
-      check('sound comes through it, gated by level', hq.peak > -50 && hq.gateWorks, `output peak ${f1(hq.peak)} dB`);
-      check('switching back returns to RNNoise', hq.back === 'rnnoise' && hq.backPeak > -50, `${hq.back}, output peak ${f1(hq.backPeak)} dB`);
     }
 
     if (wanted('nr')) console.log('\nNoise reduction slider');
@@ -1311,7 +1280,7 @@ async function renameChecks(dir, wav) {
   console.log(`Test signal: ${fixture.seconds} s, steady noise at ${NOISE_DB} dB, speech-like phrases at ${fixture.voiceLevels.join(', ')} dB`);
   try {
     if (wanted('app')) await helperChecks();
-    if (wanted('nr')) { voiceChecks(); offlineChecks(); }
+    if (wanted('nr')) { await voiceChecks(); offlineChecks(); }
     if (wanted('gate')) gateChecks(fixture);
     await liveChecks(path.join(dir, 'profile'), wav, fixture);
     if (wanted('app')) { await renameChecks(dir, wav); await updateChecks(); }

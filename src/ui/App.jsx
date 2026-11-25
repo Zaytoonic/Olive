@@ -178,17 +178,12 @@ function Gate() {
   );
 }
 
-// Noise reduction, with its engine: Standard (RNNoise) or HQ (DeepFilterNet3, a more natural voice at about twice the CPU).
+// Noise reduction (DeepFilterNet3). Strength caps how far any sound is turned down.
 function NoiseReduction() {
-  const on = useV(v => v.st.nr), amount = useV(v => v.st.nrAmount), hint = useV(v => v.nrHint), hq = useV(v => v.st.nrEngine === 'deepfilter');
+  const on = useV(v => v.st.nr), amount = useV(v => v.st.nrAmount), hint = useV(v => v.nrHint);
   return (
-    <Row title="Noise reduction" value={on ? amount + '%' : 'Off'} hint={hint}
-      end={<>
-        {on && <ToggleButton id="hqToggle" size="sm" isSelected={hq} onChange={S.setHighQuality} className="olive-chip-toggle" aria-label="High quality noise reduction">
-          <span title="High quality: a more natural voice, about twice the CPU">HQ</span>
-        </ToggleButton>}
-        <Toggle label="Noise reduction" title="Remove background noise" isSelected={on} onChange={S.setNr} />
-      </>}>
+    <Row title="Noise reduction" value={on ? amount + '%' : 'Off'} hint={hint} hintTone="warn"
+      end={<Toggle label="Noise reduction" title="Remove background noise" isSelected={on} onChange={S.setNr} />}>
       {on && <Level label="Noise reduction strength" value={amount} onChange={S.setNrAmount} />}
     </Row>
   );

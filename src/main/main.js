@@ -6,6 +6,10 @@ const { spawn } = require('child_process');
 // A simple window that mostly sits in the tray doesn't need the graphics process. Measured: about 150 MB less memory,
 // the same CPU with a moving meter, still smooth; only scrolling and dragging cost a little more, while they happen.
 app.disableHardwareAcceleration();
+// And without hardware graphics, Chromium's GPU and network helpers don't need processes of their own: they run inside
+// this one. Measured (Nov 2026): 2 fewer processes and about 89 MB less memory, the same CPU.
+app.commandLine.appendSwitch('in-process-gpu');
+app.commandLine.appendSwitch('enable-features', 'NetworkServiceInProcess2');
 
 const RENDERER = path.join(__dirname, '..', 'renderer');
 const ASSETS = path.join(__dirname, '..', '..', 'assets');
@@ -23,10 +27,10 @@ const WORKLETS = {
   '/voice-worklet.js': path.join(RENDERER, 'voice-worklet.js'),
   '/recorder-worklet.js': path.join(RENDERER, 'recorder-worklet.js'),
   '/rnnoise.wasm': path.join(RENDERER, 'vendor', 'rnnoise.wasm'),
-  // DeepFilterNet3, the "High quality" noise reduction trial: the worklet imports the polyfill and the glue as ./ modules
-  '/deepfilter-worklet.js': path.join(RENDERER, 'deepfilter-worklet.js'),
+  // voice-worklet.js imports these as ./ modules (the same layout as on disk, so the tests can load it too)
+  '/rnnoise-start.js': path.join(RENDERER, 'rnnoise-start.js'),
   '/dfn-polyfill.js': path.join(RENDERER, 'dfn-polyfill.js'),
-  '/df.js': path.join(RENDERER, 'vendor', 'deepfilter', 'df.js'),
+  '/vendor/deepfilter/df.js': path.join(RENDERER, 'vendor', 'deepfilter', 'df.js'),
   '/df_bg.wasm': path.join(RENDERER, 'vendor', 'deepfilter', 'df_bg.wasm'),
   '/DeepFilterNet3_onnx.tar.gz': path.join(RENDERER, 'vendor', 'deepfilter', 'DeepFilterNet3_onnx.tar.gz')
 };

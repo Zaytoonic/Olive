@@ -2,6 +2,13 @@
 
 What changed in each release of Olive. Downloads are on the [Releases](https://github.com/Zaytoonic/Olive/releases) page.
 
+## 2.1.0 (25 November 2026)
+
+- One noise reduction: DeepFilterNet3 (2.0's HQ) for everyone; the HQ button and RNNoise as a cleaner are gone. Its gate now follows your voice (RNNoise only listens for it), so the pauses between words are silent: on a real room recording the noise between words went from -63 dB to silence, with the voice kept just as well (-0.5 dB).
+- New installs start with the Clear voice EQ (low cut, less boom and mud, +4 dB presence) and the compressor on at 50%. Saved settings are kept.
+- Lighter: Chromium's GPU and network helpers run inside Olive's main process (2 fewer processes, about 90 MB less memory), and 35 MB of unused graphics files are gone from the app. Voice detection only runs while the gate is on Auto, and noise reduction doesn't run while it's off.
+- Choosing a mute hotkey that a soundboard key already uses says which sound has it (it blamed another app).
+
 ## 2.0.1 (25 November 2026)
 
 - The notice when you close the window is headed "Olive" with Olive's icon (it said "electron.app.Olive"), and is one short line.

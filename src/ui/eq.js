@@ -44,6 +44,8 @@ export function choosePreset(key) {
   const p = EQ_PRESETS[key]; if (!p) return;
   applyPreset(p); eqPresetPref = key; ui({ eqPreset: key }); applyEq(); savePrefs();
 }
+// A new install starts from a preset (store.js start(), when there are no saved settings).
+export function startFromPreset(key) { applyPreset(EQ_PRESETS[key]); eqPresetPref = key; }
 export function setEqOn(on) { eq.on = on; applyEq(); savePrefs(); }
 export function setLowCut(on) { eq.lowCut = on; eqPresetPref = 'custom'; ui({ eqPreset: 'custom' }); applyEq(); savePrefs(); }
 export function setEqOpen(open) {

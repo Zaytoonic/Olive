@@ -148,6 +148,8 @@ export const takesTypingKey = acc => !!acc && !acc.includes('+') && !/^(F\d+|num
 const keyOwner = acc => (acc === 'Control+M' ? 'Ctrl+M (mute, in this window)' : state.muteHotkey && state.muteAccel === acc ? 'the mute hotkey'
   : state.boardStopKey === acc ? 'Stop all'
   : (c => (c ? `"${c.name}"` : null))(state.board.find(c => c.key === acc)));
+// For the mute hotkey's chooser (keys.js): which of the soundboard's keys this is, if any.
+export const soundboardKeyOwner = acc => (state.boardStopKey === acc ? 'Stop all' : (c => (c ? `"${c.name}"` : null))(state.board.find(c => c.key === acc)));
 function setKey(target, acc) {
   if (target === 'stop') state.boardStopKey = acc;
   else state.board = state.board.map(c => (c.id === target ? { ...c, key: acc } : c));
