@@ -48,6 +48,19 @@
 
 Every release is listed in the [changelog](CHANGELOG.md).
 
+## Light on your PC
+Measured on a 16-thread Windows 11 laptop, with noise reduction, the voice gate and the compressor on (Olive 2.1, November 2026):
+
+| | Olive | SteelSeries GG (with Sonar) |
+|---|---|---|
+| Memory | about 520 MB | about 1,350 MB |
+| Background processes | 4 | 13 |
+| Installed size | 301 MB | about 1,250 MB |
+| Installer download | 138 MB | |
+| CPU | about 1% of the PC | about 0.5%, plus its audio processing inside Windows' own audio service |
+
+Olive does all of its audio processing, noise reduction included, in its own processes, so its CPU figure is the whole cost. Numbers vary from PC to PC.
+
 ## Installing
 Download `Olive-Setup-<version>.exe` from [Releases](https://github.com/Zaytoonic/Olive/releases/latest) and run it. It installs for your Windows account, with no admin rights needed, and adds a Start menu shortcut and an uninstaller. The app is not code-signed yet, so Windows may say "Windows protected your PC": click **More info**, then **Run anyway**.
 
