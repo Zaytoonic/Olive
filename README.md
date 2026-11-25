@@ -13,7 +13,7 @@
 ## Features
 <img src="docs/settings.png" align="right" width="300" alt="The Settings panel">
 
-- **Voice cleanup:** noise reduction with two engines, Standard (RNNoise) or HQ (DeepFilterNet3, a more natural voice), and a noise gate that opens only when it hears your voice.
+- **Voice cleanup:** DeepFilterNet3 noise reduction, which keeps your voice natural, and a noise gate that opens only when it hears your voice.
 - **Compressor** to even out your volume.
 - **Six-band EQ** with a low cut and presets, saved separately for each mic, and a hold-to-compare button.
 - **Send to Discord or other apps** through [VB-Audio Virtual Cable](https://vb-audio.com/Cable/).
@@ -27,10 +27,13 @@
 
 <br clear="right">
 
-## What's new in 2.0
-- **High quality noise reduction.** The **HQ** button next to Noise reduction switches to DeepFilterNet3: your voice comes through more natural, at about twice the CPU of the standard engine (around 1% of a typical PC). Its strength slider caps how much any sound is turned down, so a laugh can be ducked but not cut out.
-- **A cleaner window.** Sliders only show when they do something, and the text says only what you need.
-- **Lighter.** Mono is on by default, and noise reduction you've switched away from no longer keeps running.
+## What's new in 2.1
+- **One noise reduction, the good one.** DeepFilterNet3 (2.0's HQ) for everyone, and its gate now follows your voice, so the pauses between your words are silent. On a real room recording the noise between words went from -63 dB to silence, with the voice kept just as well.
+- **A starting point that sounds good.** New installs begin with the **Clear voice** EQ and the compressor on: a forward, easy-to-follow voice on most mics.
+- **Lighter.** 2 fewer background processes, about 90 MB less memory and 35 MB less on disk.
+
+### And in 2.0
+- A cleaner window: sliders only show when they do something, and the text says only what you need.
 
 ### And in 1.8
 - **Noise reduction that keeps your voice.** RNNoise's April 2024 model: the 2025 one treated some laughs and parts of words as noise.
@@ -106,8 +109,8 @@ src/renderer/    what the window page loads
   index.html       loads the audio engine, then the window (ui/, built from src/ui)
   audio-engine.js  the audio chain: mic capture, noise reduction, EQ, gate, compressor, soundboard, Listen and the cable. It never touches the page, so a new window can drive it the same way
   badge.html, badge.css  the Muted badge
-  voice-worklet.js noise reduction (RNNoise) and the voice gate
-  deepfilter-worklet.js  High quality noise reduction (DeepFilterNet3); dfn-polyfill.js fills in what its glue needs on the audio thread
+  voice-worklet.js noise reduction (DeepFilterNet3) and the voice gate (RNNoise's voice detection, via rnnoise-start.js);
+                   dfn-polyfill.js fills in what DeepFilterNet's glue needs on the audio thread
   gate-worklet.js  volume gate, for a gate set by hand or as the fallback
   nr-worklet.js    fallback noise reduction, if the voice engine can't start
   recorder-worklet.js  records the mic test
