@@ -2,6 +2,11 @@
 
 What changed in each release of Olive. Downloads are on the [Releases](https://github.com/Zaytoonic/Olive/releases) page.
 
+## 2.2.0 (27 November 2026)
+
+- The voice gate ignores your keyboard and mouse. A second voice detector, Silero VAD, checks RNNoise: the gate opens when Silero is sure it's your voice, or when RNNoise hears voice and Silero doesn't rule it out. On a room recording, typing alone held the gate open 42% of the time and clicks 29%; now 5% and 9%, and your voice still comes through while you type.
+- Silero VAD (MIT) runs in plain JavaScript on the audio thread, no extra runtime: about 1 MB and under 2% of one CPU core.
+
 ## 2.1.0 (25 November 2026)
 
 - One noise reduction: DeepFilterNet3 (2.0's HQ) for everyone; the HQ button and RNNoise as a cleaner are gone. Its gate now follows your voice (RNNoise only listens for it), so the pauses between words are silent: on a real room recording the noise between words went from -63 dB to silence, with the voice kept just as well (-0.5 dB).

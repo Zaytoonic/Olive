@@ -13,7 +13,7 @@
 ## Features
 <img src="docs/settings.png" align="right" width="300" alt="The Settings panel">
 
-- **Voice cleanup:** DeepFilterNet3 noise reduction, which keeps your voice natural, and a noise gate that opens only when it hears your voice.
+- **Voice cleanup:** DeepFilterNet3 noise reduction, which keeps your voice natural, and a noise gate that opens only when it hears your voice: two voice detectors (RNNoise and Silero VAD) check each other, so typing and mouse clicks stay out while your voice gets through, even over the keyboard.
 - **Compressor** to even out your volume.
 - **Six-band EQ** with a low cut and presets, saved separately for each mic, and a hold-to-compare button.
 - **Send to Discord or other apps** through [VB-Audio Virtual Cable](https://vb-audio.com/Cable/).
@@ -27,7 +27,10 @@
 
 <br clear="right">
 
-## What's new in 2.1
+## What's new in 2.2
+- **A gate that ignores your keyboard and mouse.** A second voice detector, Silero VAD, double-checks the first, so typing and clicks no longer open the gate, while your voice still gets through, even over the keyboard. On a room recording, typing alone held the gate open 42% of the time; now 5%.
+
+### And in 2.1
 - **One noise reduction, the good one.** DeepFilterNet3 (2.0's HQ) for everyone, and its gate now follows your voice, so the pauses between your words are silent. On a real room recording the noise between words went from -63 dB to silence, with the voice kept just as well.
 - **A starting point that sounds good.** New installs begin with the **Clear voice** EQ and the compressor on: a forward, easy-to-follow voice on most mics.
 - **Lighter.** 2 fewer background processes, about 90 MB less memory and 35 MB less on disk.
@@ -122,17 +125,18 @@ src/renderer/    what the window page loads
   index.html       loads the audio engine, then the window (ui/, built from src/ui)
   audio-engine.js  the audio chain: mic capture, noise reduction, EQ, gate, compressor, soundboard, Listen and the cable. It never touches the page, so a new window can drive it the same way
   badge.html, badge.css  the Muted badge
-  voice-worklet.js noise reduction (DeepFilterNet3) and the voice gate (RNNoise's voice detection, via rnnoise-start.js);
-                   dfn-polyfill.js fills in what DeepFilterNet's glue needs on the audio thread
+  voice-worklet.js noise reduction (DeepFilterNet3) and the voice gate (RNNoise's voice detection via rnnoise-start.js,
+                   checked by Silero VAD in silero-vad.js); dfn-polyfill.js fills in what DeepFilterNet's glue needs on the audio thread
   gate-worklet.js  volume gate, for a gate set by hand or as the fallback
   nr-worklet.js    fallback noise reduction, if the voice engine can't start
   recorder-worklet.js  records the mic test
   vendor/          RNNoise (xiph, v0.2 from April 2024) compiled to WebAssembly by tools/build-rnnoise.js;
-                   deepfilter/: DeepFilterNet3 and its model, built by tools/build-deepfilter.js
+                   deepfilter/: DeepFilterNet3 and its model, built by tools/build-deepfilter.js;
+                   silero/: Silero VAD v6.3's weights, taken from its ONNX model by tools/build-silero.js
 assets/          icons and mute sounds, both made from code (tools/make-icons.js, tools/make-sounds.js)
 docs/            the screenshots above
 CHANGELOG.md     what changed in each release
-tools/           build, packaging, signing, icon and sound scripts; build-rnnoise.js and build-deepfilter.js rebuild the noise reduction
+tools/           build, packaging, signing, icon and sound scripts; build-rnnoise.js, build-deepfilter.js and build-silero.js rebuild the noise reduction and voice detection
   audio-test/      npm run test:audio
   installer/       the installer and uninstaller source, and npm run test:installer
 ```
@@ -140,4 +144,4 @@ tools/           build, packaging, signing, icon and sound scripts; build-rnnois
 The palette and icon are described in [DESIGN.md](DESIGN.md).
 
 ## Licence
-Olive is released under the [MIT licence](LICENSE): you can use, change and share it, as long as the copyright notice stays with it. The bundled noise reduction in `src/renderer/vendor` keeps its own licences: RNNoise is BSD (`rnnoise-LICENSE.txt`), DeepFilterNet's code and model are MIT or Apache-2.0 (`deepfilter/LICENSE.txt`).
+Olive is released under the [MIT licence](LICENSE): you can use, change and share it, as long as the copyright notice stays with it. The bundled noise reduction in `src/renderer/vendor` keeps its own licences: RNNoise is BSD (`rnnoise-LICENSE.txt`), DeepFilterNet's code and model are MIT or Apache-2.0 (`deepfilter/LICENSE.txt`), Silero VAD is MIT (`silero/LICENSE.txt`).

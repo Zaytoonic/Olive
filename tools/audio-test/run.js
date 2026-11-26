@@ -147,9 +147,9 @@ async function loadVoiceModule() {
   if (VoiceProc) return;
   Object.assign(globalThis, { sampleRate: SR, AudioWorkletProcessor: class { constructor() { this.port = { postMessage() {}, onmessage: null }; } }, registerProcessor: (_, c) => { VoiceProc = c; } });
   await import(require('url').pathToFileURL(path.join(RENDERER, 'voice-worklet.js')).href);
-  voiceFiles = { wasm: new WebAssembly.Module(fs.readFileSync(path.join(RENDERER, 'vendor', 'deepfilter', 'df_bg.wasm'))), rnnoise: new WebAssembly.Module(fs.readFileSync(path.join(RENDERER, 'vendor', 'rnnoise.wasm'))), model: new Uint8Array(fs.readFileSync(path.join(RENDERER, 'vendor', 'deepfilter', 'DeepFilterNet3_onnx.tar.gz'))) };
+  voiceFiles = { wasm: new WebAssembly.Module(fs.readFileSync(path.join(RENDERER, 'vendor', 'deepfilter', 'df_bg.wasm'))), rnnoise: new WebAssembly.Module(fs.readFileSync(path.join(RENDERER, 'vendor', 'rnnoise.wasm'))), silero: new Uint8Array(fs.readFileSync(path.join(RENDERER, 'vendor', 'silero', 'silero_vad_16k.bin'))), model: new Uint8Array(fs.readFileSync(path.join(RENDERER, 'vendor', 'deepfilter', 'DeepFilterNet3_onnx.tar.gz'))) };
 }
-function loadVoice() { return new VoiceProc({ processorOptions: { wasm: voiceFiles.wasm, rnnoise: voiceFiles.rnnoise, model: voiceFiles.model.slice().buffer } }); }
+function loadVoice() { return new VoiceProc({ processorOptions: { wasm: voiceFiles.wasm, rnnoise: voiceFiles.rnnoise, silero: voiceFiles.silero.slice().buffer, model: voiceFiles.model.slice().buffer } }); }
 function runVoice(input, strength, gate) {
   const p = loadVoice(), out = new Float32Array(input.length), params = { strength: new Float32Array([strength]), gate: new Float32Array([gate]) };
   for (let i = 0; i + 128 <= input.length; i += 128) { const o = new Float32Array(128); p.process([[input.subarray(i, i + 128)]], [[o]], params); out.set(o, i); }

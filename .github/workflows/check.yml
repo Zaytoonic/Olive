@@ -30,4 +30,4 @@ jobs:
         shell: bash
         run: |
           for f in src/main/*.js src/renderer/audio-engine.js tools/*.js; do node --check "$f" || exit 1; done
-          for f in src/renderer/*-worklet.js src/renderer/rnnoise-start.js; do node --check --input-type=module < "$f" || exit 1; done
+          for f in src/renderer/*-worklet.js src/renderer/rnnoise-start.js src/renderer/silero-vad.js; do node --check --input-type=module < "$f" || exit 1; done
