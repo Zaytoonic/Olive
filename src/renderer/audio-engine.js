@@ -221,7 +221,7 @@ const engine = (() => {
   // Preferred: gate-worklet.js on the audio thread (sample-accurate, 5 ms look-ahead, 150 ms hold).
   // Fallback if it can't load: a gate run every 20 ms from this thread (can clip word starts).
   const GATE_WORKLET_URL = 'app://local/gate-worklet.js', NR_WORKLET_URL = 'app://local/nr-worklet.js', VOICE_WORKLET_URL = 'app://local/voice-worklet.js';
-  const RNNOISE_WASM_URL = 'app://local/rnnoise.wasm';
+  const RNNOISE_WASM_URL = 'app://local/rnnoise.wasm', SILERO_URL = 'app://local/silero_vad_16k.bin';
   const gateModules = new WeakMap(), nrModules = new WeakMap();
   function loadGateModule(ctx) {
     if (!gateModules.has(ctx)) gateModules.set(ctx, ctx.audioWorklet.addModule(GATE_WORKLET_URL));
@@ -305,15 +305,15 @@ const engine = (() => {
   }
 
   // ---- Voice cleanup ----
-  // voice-worklet.js: DeepFilterNet3 cleans, RNNoise's voice detection gates. If it can't run, nr-worklet.js and the
+  // voice-worklet.js: DeepFilterNet3 cleans, RNNoise's and Silero's voice detection gate. If it can't run, nr-worklet.js and the
   // volume gate remain. The two networks and the model are fetched and compiled once here and handed to each worklet,
-  // which can't fetch files itself.
+  // which can't fetch files itself (Silero's weights are copied for each, since passing one hands it over).
   const DFN_WASM_URL = 'app://local/df_bg.wasm', DFN_MODEL_URL = 'app://local/DeepFilterNet3_onnx.tar.gz';
   let voiceFiles = null;
   function loadVoiceFiles() {
     if (!voiceFiles) {
       const get = url => fetch(url).then(r => { if (!r.ok) throw new Error(url + ': ' + r.status); return r.arrayBuffer(); });
-      voiceFiles = Promise.all([get(DFN_WASM_URL).then(b => WebAssembly.compile(b)), get(DFN_MODEL_URL), get(RNNOISE_WASM_URL).then(b => WebAssembly.compile(b))]);
+      voiceFiles = Promise.all([get(DFN_WASM_URL).then(b => WebAssembly.compile(b)), get(DFN_MODEL_URL), get(RNNOISE_WASM_URL).then(b => WebAssembly.compile(b)), get(SILERO_URL)]);
       voiceFiles.catch(() => { voiceFiles = null; });      // try again next time instead of keeping the failure
     }
     return voiceFiles;
@@ -321,9 +321,9 @@ const engine = (() => {
   async function attachVoice(ch) {
     try {
       if (ch.ctx.sampleRate !== 48000) throw new Error('needs 48 kHz, got ' + ch.ctx.sampleRate);
-      const [[wasm, model, rnnoise]] = await Promise.all([loadVoiceFiles(), ch.ctx.audioWorklet.addModule(VOICE_WORKLET_URL)]);
+      const [[wasm, model, rnnoise, silero]] = await Promise.all([loadVoiceFiles(), ch.ctx.audioWorklet.addModule(VOICE_WORKLET_URL)]);
       if (ch.ctx.state === 'closed') return;
-      const node = new AudioWorkletNode(ch.ctx, 'voice-cleanup', { numberOfInputs: 1, numberOfOutputs: 1, processorOptions: { wasm, model: model.slice(0), rnnoise }, parameterData: { strength: nrStrengthNow(), gate: cfg.gateAuto ? 1 : 0 } });
+      const node = new AudioWorkletNode(ch.ctx, 'voice-cleanup', { numberOfInputs: 1, numberOfOutputs: 1, processorOptions: { wasm, model: model.slice(0), rnnoise, silero: silero.slice(0) }, parameterData: { strength: nrStrengthNow(), gate: cfg.gateAuto ? 1 : 0 } });
       node.port.onmessage = e => { if (cfg.gateAuto && typeof (e.data || {}).open === 'boolean') ch.gateIsOpen = e.data.open; };
       node.onprocessorerror = () => { console.warn('Voice cleanup crashed; using the older noise reduction'); detachNr(ch); ch.voice = null; ch.voiceFailed = true; routeChain(ch); attachNr(ch); changed(); };
       ch.nr = node; ch.voice = node;

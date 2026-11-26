@@ -1,24 +1,31 @@
-// Voice cleanup on the audio thread (AudioWorklet): DeepFilterNet3 cleans the voice, RNNoise listens for it.
+// Voice cleanup on the audio thread (AudioWorklet): DeepFilterNet3 cleans the voice, RNNoise and Silero listen for it.
 // - Noise: DeepFilterNet3 (vendor/deepfilter, built by tools/build-deepfilter.js) is a 48 kHz network that cleans each
 //   10 ms frame in two stages, gains per frequency band and then a filter below 5 kHz that rebuilds the voice's
 //   harmonics. Strength sets its attenuation limit: nothing is turned down more than strength x 0.3 dB (100% = no limit),
 //   so a laugh it takes for noise can only be ducked. At 0 (noise reduction off) it doesn't run: the raw mic passes, on time.
-// - Gate: opens on detected voice, not volume, so a fan gust or a keyboard isn't taken for a word. The voice probability
-//   comes from RNNoise (vendor/rnnoise.wasm, via rnnoise-start.js), which only runs while the gate is on. It is known
-//   before DeepFilterNet's output of the same audio (which lags 40 ms), so the gate is open when a word starts, and it
-//   stays open HOLD_MS after the last voice. On Olive's room recording (Nov 2026) DeepFilterNet3 alone left the room's
-//   noise at -63 dB between words; with this gate the pauses were silent and the voice was kept just as well (-0.5 dB).
+// - Gate: opens on detected voice, not volume, so a fan gust or a keyboard isn't taken for a word. Two detectors, which
+//   only run while the gate is on: RNNoise (vendor/rnnoise.wasm, via rnnoise-start.js, every 10 ms) and Silero VAD
+//   (silero-vad.js, every 32 ms). The gate opens when Silero is sure it's voice, or when RNNoise hears voice and Silero
+//   doesn't rule it out. Silero alone ignores keys and clicks but loses a voice talking over typing; RNNoise alone keeps
+//   that voice but opens on keystrokes. On a room recording (Nov 2026) typing alone held RNNoise's gate open 42% of the
+//   time and clicks 29%; combined, 5% and 9%, and the voice over typing came through (by ear: it can't be measured
+//   apart from the keys). Both are known before DeepFilterNet's output of the same audio (which lags 40 ms), so the
+//   gate is open when a word starts, and it stays open HOLD_MS after the last voice.
 // - Mono: the networks run once, on the channels' average, and every output channel gets the result.
-// Both networks need 48 kHz; at other rates audio passes through unchanged. The page compiles both wasm files and fetches
+// The networks need 48 kHz; at other rates audio passes through unchanged. The page compiles both wasm files and fetches
 // the model, and passes them in processorOptions (a worklet can't fetch files itself).
 import './dfn-polyfill.js';
 import { initSync, df_create, df_process_frame, df_set_atten_lim, df_set_post_filter_beta } from './vendor/deepfilter/df.js';
 import { startRnnoise } from './rnnoise-start.js';
+import { startSilero } from './silero-vad.js';
 
 const FRAME = 480;
 const DELAY = 1920;                    // DeepFilterNet's 1440 samples (STFT and 2 frames of look-ahead) + collecting a frame
-// The voice probability that opens the gate: at 0.8 noise stays shut and every word start still opens it.
+// RNNoise's voice probability that counts as voice: at 0.8 room noise stays shut and every word start still opens it.
 const VOICE_ON = 0.8;
+// Silero's: at SILERO_SURE it opens on its own (its own default threshold). Below SILERO_VETO it overrules RNNoise: on
+// the room recording Silero gave keys 0.002 and clicks 0.05 (medians, where RNNoise heard voice), a voice over typing 0.14.
+const SILERO_SURE = 0.5, SILERO_VETO = 0.1;
 const HOLD_MS = 300;
 const RISE_MS = 2, FALL_MS = 80;
 const limitFor = strength => (strength >= 100 ? 100 : Math.max(0.5, strength * 0.3));   // below 0.01 dB it skips its STFT (and its delay)
@@ -34,18 +41,20 @@ class VoiceCleanup extends AudioWorkletProcessor {
   constructor(options) {
     super();
     // Throws if a wasm or the model is missing or won't start; the page then sees a processor error and falls back.
-    const { wasm, model, rnnoise } = options.processorOptions;
+    const { wasm, model, rnnoise, silero } = options.processorOptions;
     this.supported = sampleRate === 48000;
     initSync({ module: wasm });
     this.df = df_create(new Uint8Array(model), 100);     // about 0.4 s, once
     df_set_post_filter_beta(this.df, 0);                 // the post-filter only adds suppression (measured: 0.6 dB more on room noise)
-    this.voiceOf = startRnnoise(rnnoise);
+    this.rnnVoice = startRnnoise(rnnoise);
+    this.sileroVoice = startSilero(silero);
+    this.silero = 0;                                     // Silero's latest probability (it scores 32 ms at a time)
     this.limit = 100;
     this.input = new Float32Array(FRAME);
     this.cur = new Float32Array(FRAME);                  // the cleaned frame being played; starts as a frame of silence
     this.dry = new Float32Array(DELAY);                  // the raw mic, DELAY behind, for noise reduction off
     this.pos = 0; this.dryPos = 0;
-    this.gain = 0; this.hold = 0; this.open = false; this.frameVoice = 0;
+    this.gain = 0; this.hold = 0; this.open = false;
     this.holdSamples = Math.round(sampleRate * HOLD_MS / 1000);
     this.gainUp = Math.exp(-1 / (sampleRate * RISE_MS / 1000));
     this.gainDown = Math.exp(-1 / (sampleRate * FALL_MS / 1000));
@@ -76,7 +85,11 @@ class VoiceCleanup extends AudioWorkletProcessor {
       const y = off ? dry : this.cur[pos];
       if (++pos === FRAME) {
         pos = 0;
-        if (gateOn) { const v = this.voiceOf(this.input); this.frameVoice = v; if (v >= VOICE_ON) hold = this.holdSamples; }
+        if (gateOn) {
+          const s = this.sileroVoice(this.input); if (s >= 0) this.silero = s;
+          const r = this.rnnVoice(this.input);
+          if (this.silero >= SILERO_SURE || (r >= VOICE_ON && this.silero >= SILERO_VETO)) hold = this.holdSamples;
+        }
         if (!off) this.cur = df_process_frame(this.df, this.input);
       }
       if (hold > 0) hold--;

@@ -29,6 +29,8 @@ const WORKLETS = {
   '/rnnoise.wasm': path.join(RENDERER, 'vendor', 'rnnoise.wasm'),
   // voice-worklet.js imports these as ./ modules (the same layout as on disk, so the tests can load it too)
   '/rnnoise-start.js': path.join(RENDERER, 'rnnoise-start.js'),
+  '/silero-vad.js': path.join(RENDERER, 'silero-vad.js'),
+  '/silero_vad_16k.bin': path.join(RENDERER, 'vendor', 'silero', 'silero_vad_16k.bin'),
   '/dfn-polyfill.js': path.join(RENDERER, 'dfn-polyfill.js'),
   '/vendor/deepfilter/df.js': path.join(RENDERER, 'vendor', 'deepfilter', 'df.js'),
   '/df_bg.wasm': path.join(RENDERER, 'vendor', 'deepfilter', 'df_bg.wasm'),
@@ -38,7 +40,7 @@ function serveWorklet(request) {
   const url = new URL(request.url);
   const file = url.host === 'local' ? WORKLETS[url.pathname] : undefined;
   if (!file) return new Response('Not found', { status: 404 });
-  const type = file.endsWith('.wasm') ? 'application/wasm' : file.endsWith('.gz') ? 'application/gzip' : 'text/javascript';
+  const type = file.endsWith('.wasm') ? 'application/wasm' : file.endsWith('.gz') ? 'application/gzip' : file.endsWith('.bin') ? 'application/octet-stream' : 'text/javascript';
   return fs.promises.readFile(file)
     .then(data => new Response(data, { headers: { 'content-type': type, 'access-control-allow-origin': '*' } }))
     .catch(() => new Response('Not found', { status: 404 }));
