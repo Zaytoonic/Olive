@@ -21,12 +21,17 @@ import { startSilero } from './silero-vad.js';
 
 const FRAME = 480;
 const DELAY = 1920;                    // DeepFilterNet's 1440 samples (STFT and 2 frames of look-ahead) + collecting a frame
-// RNNoise's voice probability that counts as voice: at 0.8 room noise stays shut and every word start still opens it.
-const VOICE_ON = 0.8;
+// RNNoise's voice probability that counts as voice. 0.6: laughs dip below 0.8 between their bursts (0.8 kept room noise
+// out too, but so does 0.6, and Silero's veto keeps keys out either way).
+const VOICE_ON = 0.6;
 // Silero's: at SILERO_SURE it opens on its own (its own default threshold). Below SILERO_VETO it overrules RNNoise: on
 // the room recording Silero gave keys 0.002 and clicks 0.05 (medians, where RNNoise heard voice), a voice over typing 0.14.
 const SILERO_SURE = 0.5, SILERO_VETO = 0.1;
-const HOLD_MS = 300;
+// How long the gate stays open after the last voice. 600 ms bridges the gaps in a laugh ("ha ... ha"). On two laugh
+// recordings (Nov 2026), 300 -> 600 ms (with VOICE_ON 0.8 -> 0.6) let through 84 -> 90% and 94 -> 98% of the loud
+// laughing, 69 -> 83% and 86 -> 89% of talking with laughs; typing alone held the gate open 6 -> 12%, clicks still 0%.
+// Picked by ear over 450 ms.
+const HOLD_MS = 600;
 const RISE_MS = 2, FALL_MS = 80;
 const limitFor = strength => (strength >= 100 ? 100 : Math.max(0.5, strength * 0.3));   // below 0.01 dB it skips its STFT (and its delay)
 
