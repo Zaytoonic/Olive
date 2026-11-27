@@ -74,6 +74,8 @@ Olive checks GitHub once a day for a new version, and the gear shows a dot when 
 2. In Olive, choose your mic and leave **Send to Discord / other apps** on.
 3. In Discord, open **Voice & Video** and set the input device to **CABLE Output**.
 
+**About delay.** Going through Olive and the virtual cable adds about 0.2 s before Discord hears you (measured on a Windows 11 laptop: about 40 ms is the noise reduction listening slightly ahead, the rest is Windows and VB-Cable buffering). You won't notice it in normal chat, but in fast competitive games your call-outs arrive a little later. When every fraction of a second counts, set your mic straight in Discord's **Voice & Video** and turn on Discord's own noise suppression; switch back to **CABLE Output** afterwards. Olive's mute hotkey, mute sounds and Muted badge keep working either way, since they mute your mic in Windows.
+
 ## Building from source
 You need Windows and [Node.js](https://nodejs.org/).
 ```
