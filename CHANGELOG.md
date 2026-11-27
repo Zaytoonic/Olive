@@ -2,6 +2,10 @@
 
 What changed in each release of Olive. Downloads are on the [Releases](https://github.com/Zaytoonic/Olive/releases) page.
 
+## 2.2.1 (27 November 2026)
+
+- Laughs come through: the voice gate stays open 600 ms after your last word (was 300 ms) and hears voice a little sooner, so the gaps inside a laugh no longer shut it. On two laugh recordings, 90% and 98% of the laughing got through (was 84% and 94%), and 83% and 89% of talking while laughing (was 69% and 86%). Mouse clicks still don't open it; typing alone holds it open a little more often (12% of the time, was 6%), and goes through the noise reduction.
+
 ## 2.2.0 (27 November 2026)
 
 - The voice gate ignores your keyboard and mouse. A second voice detector, Silero VAD, checks RNNoise: the gate opens when Silero is sure it's your voice, or when RNNoise hears voice and Silero doesn't rule it out. On a room recording, typing alone held the gate open 42% of the time and clicks 29%; now 5% and 9%, and your voice still comes through while you type.
